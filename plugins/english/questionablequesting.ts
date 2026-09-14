@@ -10,7 +10,7 @@ class QuestionableQuesting implements Plugin.PluginBase {
   id = 'questionablequesting';
   name = 'Questionable Questing';
   site = SITE;
-  version = '1.1.6';
+  version = '1.1.7';
   icon = 'src/en/questionablequesting/icon.png';
   author = 'personal';
 
@@ -26,6 +26,18 @@ class QuestionableQuesting implements Plugin.PluginBase {
     return upgraded.startsWith('http') ? upgraded : SITE + upgraded;
   }
 
+  // Pick the thread-root link from a XenForo thread title block.
+  // Skips /unread, /post-NNN, /latest which break parseNovel.
+  pickThreadRoot(hrefs: (string | undefined)[]): string | undefined {
+    for (const h of hrefs) {
+      if (!h) continue;
+      if (!/\/(unread|latest)(\/|$)/.test(h) && !/\/post-\d+/.test(h)) {
+        return h;
+      }
+    }
+    return hrefs[0];
+  }
+
   async popularNovels(): Promise<Plugin.NovelItem[]> {
     const url = `${SITE}/forums/nsfw-creative-writing.${NSFW_CREATIVE_WRITING_ID}/`;
     const $ = await this.fetchPage(url);
@@ -35,9 +47,14 @@ class QuestionableQuesting implements Plugin.PluginBase {
       if ($(el).find('.structItem-status--sticky').length > 0) return;
 
       const links = $(el).find('.structItem-title a');
-      // href from the FIRST link (thread root), title from the LAST (skips [NSFW] prefix)
-      const href = links.first().attr('href');
       const titleText = links.last().text().trim();
+
+      // Collect all hrefs and pick the thread-root one
+      const hrefs: (string | undefined)[] = [];
+      links.each((_j, a) => {
+        hrefs.push($(a).attr('href'));
+      });
+      const href = this.pickThreadRoot(hrefs);
       if (!href) return;
 
       const avatarImg = $(el).find('.structItem-cell--icon img').first();
@@ -82,6 +99,9 @@ class QuestionableQuesting implements Plugin.PluginBase {
   }
 
   async parseNovel(novelPath: string): Promise<Plugin.SourceNovel> {
+    // Normalize any URL shape to a bare slug:
+    // full URL, /threads/slug.123/, /threads/slug.123/post-999,
+    // /threads/slug.123/unread, /threads/slug.123/latest, query strings
     const slug = novelPath
       .replace(/^https?:\/\/[^/]+/, '')
       .replace(/^\/?threads\//, '')
@@ -162,13 +182,14 @@ class QuestionableQuesting implements Plugin.PluginBase {
         const href = linkEl.attr('href');
         if (!href) return;
 
+        // --- Date extraction: force integer seconds -> ms ---
         const timeEl = el$.find('time.structItem-latestDate').first();
         let releaseTime: number | undefined = undefined;
 
         const dataTime = timeEl.attr('data-time');
         if (dataTime && /^\d+$/.test(dataTime)) {
           const ts = parseInt(dataTime, 10);
-          releaseTime = dataTime.length === 13 ? ts : ts * 1000;
+          releaseTime = Math.floor(dataTime.length === 13 ? ts : ts * 1000);
         } else {
           const dateStr = timeEl.attr('data-date-string');
           if (dateStr) {
@@ -178,7 +199,7 @@ class QuestionableQuesting implements Plugin.PluginBase {
               const m = parseInt(parts[1], 10);
               const y = parseInt(parts[2], 10);
               if (!isNaN(d) && !isNaN(m) && !isNaN(y)) {
-                releaseTime = new Date(y, m - 1, d).getTime();
+                releaseTime = Math.floor(new Date(y, m - 1, d).getTime());
               }
             }
           }
