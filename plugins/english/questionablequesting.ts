@@ -10,7 +10,7 @@ class QuestionableQuesting implements Plugin.PluginBase {
   id = 'questionablequesting';
   name = 'Questionable Questing';
   site = SITE;
-  version = '1.2.2';
+  version = '1.2.5';
   icon = 'src/en/questionablequesting/icon.png';
   author = 'personal';
 
@@ -26,7 +26,6 @@ class QuestionableQuesting implements Plugin.PluginBase {
     return upgraded.startsWith('http') ? upgraded : SITE + upgraded;
   }
 
-  // Strip XenForo thread-title prefixes like [NSFW], [Quest], etc.
   stripTitlePrefix(title: string): string {
     return title.replace(/^\[(NSFW|Quest|CYOA)\]\s*/i, '').trim();
   }
@@ -41,12 +40,14 @@ class QuestionableQuesting implements Plugin.PluginBase {
     return hrefs[0];
   }
 
-  async popularNovels(): Promise<Plugin.NovelItem[]> {
-    const url = `${SITE}/forums/nsfw-creative-writing.${NSFW_CREATIVE_WRITING_ID}/`;
+  async popularNovels(page: number = 1): Promise<Plugin.NovelItem[]> {
+    const baseUrl = `${SITE}/forums/nsfw-creative-writing.${NSFW_CREATIVE_WRITING_ID}`;
+    const url = page === 1 ? `${baseUrl}/` : `${baseUrl}/page-${page}/`;
     const $ = await this.fetchPage(url);
 
     const novels: Plugin.NovelItem[] = [];
     $('.structItem--thread').each((_i, el) => {
+      // Sticky threads only appear on page 1; this check is a no-op on later pages
       if ($(el).find('.structItem-status--sticky').length > 0) return;
 
       const links = $(el).find('.structItem-title a');
@@ -171,12 +172,10 @@ class QuestionableQuesting implements Plugin.PluginBase {
     return chapters;
   }
 
-  // Clean the OP text into a readable plain-text summary.
   extractSummary($thread: CheerioAPI): string {
     const firstPost = $thread('.message:first .bbWrapper').first();
     if (firstPost.length === 0) return '';
 
-    // Remove quoted posts, spoilers, code blocks, and buttons
     firstPost
       .find(
         '.bbCodeBlock, .bbCodeSpoiler, .bbCodeBlock--quote, button, .bbCodeBlock-expandLink, .bbCodeBlock-shrinkLink',
@@ -216,7 +215,6 @@ class QuestionableQuesting implements Plugin.PluginBase {
     const defaultUrl = `${SITE}/threads/${slug}/threadmarks`;
     const $ = await this.fetchPage(`${defaultUrl}?per_page=${PER_PAGE}`);
 
-    // --- Title (strip prefix + label spans) ---
     const titleEl = $('.p-title-value').first();
     titleEl.find('.unreadLink, .labelLink, .label, .label-append').remove();
     const rawTitle =
@@ -225,10 +223,8 @@ class QuestionableQuesting implements Plugin.PluginBase {
       'Untitled';
     const title = this.stripTitlePrefix(rawTitle);
 
-    // --- Author ---
     const author = $('.username').first().text().trim() || 'Unknown';
 
-    // --- Avatar + summary from main thread page ---
     let cover = '';
     let summary = '';
     const threadMainUrl = `${SITE}/threads/${slug}/`;
@@ -241,7 +237,6 @@ class QuestionableQuesting implements Plugin.PluginBase {
 
       summary = this.extractSummary($thread).slice(0, 500);
 
-      // Fallback to meta description if summary is too short/empty
       if (!summary || summary.length < 50) {
         summary =
           $('meta[name="description"]').attr('content')?.trim() || summary;
@@ -260,7 +255,6 @@ class QuestionableQuesting implements Plugin.PluginBase {
       chapters: [],
     };
 
-    // --- Threadmark categories ---
     const categories: { label: string; url: string; isMain: boolean }[] = [];
     $('.block-tabHeader--threadmarkCategoryTabs a.tabs-tab').each((_i, el) => {
       const href = $(el).attr('href');
