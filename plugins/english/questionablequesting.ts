@@ -10,7 +10,7 @@ class QuestionableQuesting implements Plugin.PluginBase {
   id = 'questionablequesting';
   name = 'Questionable Questing';
   site = SITE;
-  version = '1.1.4';
+  version = '1.1.5';
   icon = 'src/en/questionablequesting/icon.png';
   author = 'personal';
 
@@ -36,7 +36,9 @@ class QuestionableQuesting implements Plugin.PluginBase {
       // Skip sticky (pinned) threads
       if ($(el).find('.structItem-status--sticky').length > 0) return;
 
-      const linkEl = $(el).find('.structItem-title a').last();
+      // .first() = thread root URL. .last() would be the latest-post URL,
+      // which breaks parseNovel because it points at a single post.
+      const linkEl = $(el).find('.structItem-title a').first();
       const href = linkEl.attr('href');
       if (!href) return;
 
@@ -82,10 +84,17 @@ class QuestionableQuesting implements Plugin.PluginBase {
   }
 
   async parseNovel(novelPath: string): Promise<Plugin.SourceNovel> {
+    // Normalize any URL shape to a bare slug:
+    // full URL, /threads/slug.123/, /threads/slug.123/post-999,
+    // /threads/slug.123/unread, /threads/slug.123/latest, etc.
     const slug = novelPath
       .replace(/^https?:\/\/[^/]+/, '')
-      .replace(/^\/threads\//, '')
+      .replace(/^\/?threads\//, '')
       .replace(/\/threadmarks.*$/, '')
+      .replace(/\/post-\d+.*$/, '')
+      .replace(/\/unread.*$/, '')
+      .replace(/\/latest.*$/, '')
+      .replace(/\?.*$/, '')
       .replace(/\/$/, '');
 
     const threadUrl = `${SITE}/threads/${slug}/threadmarks?per_page=${PER_PAGE}`;
@@ -204,7 +213,7 @@ class QuestionableQuesting implements Plugin.PluginBase {
     if (body.length === 0) body = $('.bbWrapper').first();
 
     body.find('.bbCodeBlock-expandLink, .bbCodeBlock-shrinkLink').remove();
-    body.find('.bbCodeBlockSpoiler button').remove();
+    body.find('.bbCodeSpoiler button').remove();
 
     body.find('img').each((_i, el) => {
       const src = $(el).attr('src');
