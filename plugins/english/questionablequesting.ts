@@ -10,7 +10,7 @@ class QuestionableQuesting implements Plugin.PluginBase {
   id = 'questionablequesting';
   name = 'Questionable Questing';
   site = SITE;
-  version = '1.1.2';
+  version = '1.1.3';
   icon = 'src/en/questionablequesting/icon.png';
   author = 'personal';
 
@@ -40,8 +40,37 @@ class QuestionableQuesting implements Plugin.PluginBase {
       const href = linkEl.attr('href');
       if (!href) return;
 
-      // Avatar sits in the icon cell of the same listing row
       const avatarImg = $(el).find('.structItem-cell--icon img').first();
+      const src = avatarImg.attr('src') || avatarImg.attr('data-src');
+
+      novels.push({
+        name: linkEl.text().trim(),
+        path: href,
+        cover: src ? this.upgradeAvatar(src) : undefined,
+      });
+    });
+
+    return novels;
+  }
+
+  async searchNovels(
+    searchTerm: string,
+    page: number = 1,
+  ): Promise<Plugin.NovelItem[]> {
+    // XenForo search — restrict to thread titles only
+    const url =
+      `${SITE}/search/search?keywords=${encodeURIComponent(searchTerm)}` +
+      `&t=thread&c[title_only]=1&page=${page}`;
+    const $ = await this.fetchPage(url);
+
+    const novels: Plugin.NovelItem[] = [];
+    $('.contentRow').each((_i, el) => {
+      const linkEl = $(el).find('.contentRow-title a').first();
+      const href = linkEl.attr('href');
+      if (!href) return;
+
+      // Avatar sits in the search result figure cell
+      const avatarImg = $(el).find('.contentRow-figure img').first();
       const src = avatarImg.attr('src') || avatarImg.attr('data-src');
 
       novels.push({
@@ -125,8 +154,6 @@ class QuestionableQuesting implements Plugin.PluginBase {
 
       $p('.structItemContainer .structItem--threadmark').each((_i, el) => {
         const el$ = $p(el);
-
-        // Skip pagination filler rows
         if (el$.hasClass('structItem--threadmark-filler')) return;
 
         const linkEl = el$.find('.structItem-title a').first();
