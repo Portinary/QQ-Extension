@@ -10,7 +10,7 @@ class QuestionableQuesting implements Plugin.PluginBase {
   id = 'questionablequesting';
   name = 'Questionable Questing';
   site = SITE;
-  version = '1.1.7';
+  version = '1.1.8';
   icon = 'src/en/questionablequesting/icon.png';
   author = 'personal';
 
@@ -26,8 +26,6 @@ class QuestionableQuesting implements Plugin.PluginBase {
     return upgraded.startsWith('http') ? upgraded : SITE + upgraded;
   }
 
-  // Pick the thread-root link from a XenForo thread title block.
-  // Skips /unread, /post-NNN, /latest which break parseNovel.
   pickThreadRoot(hrefs: (string | undefined)[]): string | undefined {
     for (const h of hrefs) {
       if (!h) continue;
@@ -49,7 +47,6 @@ class QuestionableQuesting implements Plugin.PluginBase {
       const links = $(el).find('.structItem-title a');
       const titleText = links.last().text().trim();
 
-      // Collect all hrefs and pick the thread-root one
       const hrefs: (string | undefined)[] = [];
       links.each((_j, a) => {
         hrefs.push($(a).attr('href'));
@@ -98,10 +95,85 @@ class QuestionableQuesting implements Plugin.PluginBase {
     return novels;
   }
 
+  // Extract chapters from one threadmarks page, with optional prefix
+  extractChapters($page: CheerioAPI, prefix: string): Plugin.ChapterItem[] {
+    const chapters: Plugin.ChapterItem[] = [];
+
+    $page('.structItemContainer .structItem--threadmark').each((_i, el) => {
+      const el$ = $page(el);
+      if (el$.hasClass('structItem--threadmark-filler')) return;
+
+      const linkEl = el$.find('.structItem-title a').first();
+      const href = linkEl.attr('href');
+      if (!href) return;
+
+      const rawName = linkEl.text().trim();
+      const name = prefix ? `${prefix} - ${rawName}` : rawName;
+
+      const timeEl = el$.find('time.structItem-latestDate').first();
+      let releaseTime: number | undefined = undefined;
+
+      const dataTime = timeEl.attr('data-time');
+      if (dataTime && /^\d+$/.test(dataTime)) {
+        const ts = parseInt(dataTime, 10);
+        releaseTime = Math.floor(dataTime.length === 13 ? ts : ts * 1000);
+      } else {
+        const dateStr = timeEl.attr('data-date-string');
+        if (dateStr) {
+          const parts = dateStr.split('/');
+          if (parts.length === 3) {
+            const d = parseInt(parts[0], 10);
+            const m = parseInt(parts[1], 10);
+            const y = parseInt(parts[2], 10);
+            if (!isNaN(d) && !isNaN(m) && !isNaN(y)) {
+              releaseTime = Math.floor(new Date(y, m - 1, d).getTime());
+            }
+          }
+        }
+      }
+
+      chapters.push({ name, path: href, releaseTime });
+    });
+
+    return chapters;
+  }
+
+  // Read "Threadmarks: N" header to compute total pages
+  countChaptersAndPages($page: CheerioAPI): {
+    count: number;
+    pages: number;
+  } {
+    const stats = $page('.threadmarkListingHeader-stats dl.pairs')
+      .filter((_i, el) => $page(el).find('dt').text().trim() === 'Threadmarks')
+      .first();
+    const count = parseInt(
+      stats.find('dd').text().replace(/,/g, '') || '0',
+      10,
+    );
+    return { count, pages: count > 0 ? Math.ceil(count / PER_PAGE) : 1 };
+  }
+
+  // Fetch one category fully (with pagination), returns all chapters
+  async fetchCategory(
+    baseUrl: string,
+    prefix: string,
+  ): Promise<Plugin.ChapterItem[]> {
+    const firstUrl = `${baseUrl}${baseUrl.includes('?') ? '&' : '?'}per_page=${PER_PAGE}`;
+    const $first = await this.fetchPage(firstUrl);
+
+    const { pages } = this.countChaptersAndPages($first);
+    let chapters = this.extractChapters($first, prefix);
+
+    for (let p = 2; p <= pages; p++) {
+      const pageUrl = `${firstUrl}&page=${p}`;
+      const $p = await this.fetchPage(pageUrl);
+      chapters = chapters.concat(this.extractChapters($p, prefix));
+    }
+
+    return chapters;
+  }
+
   async parseNovel(novelPath: string): Promise<Plugin.SourceNovel> {
-    // Normalize any URL shape to a bare slug:
-    // full URL, /threads/slug.123/, /threads/slug.123/post-999,
-    // /threads/slug.123/unread, /threads/slug.123/latest, query strings
     const slug = novelPath
       .replace(/^https?:\/\/[^/]+/, '')
       .replace(/^\/?threads\//, '')
@@ -112,8 +184,8 @@ class QuestionableQuesting implements Plugin.PluginBase {
       .replace(/\?.*$/, '')
       .replace(/\/$/, '');
 
-    const threadUrl = `${SITE}/threads/${slug}/threadmarks?per_page=${PER_PAGE}`;
-    const $ = await this.fetchPage(threadUrl);
+    const defaultUrl = `${SITE}/threads/${slug}/threadmarks`;
+    const $ = await this.fetchPage(`${defaultUrl}?per_page=${PER_PAGE}`);
 
     // --- Title ---
     const titleEl = $('.p-title-value').first();
@@ -132,7 +204,6 @@ class QuestionableQuesting implements Plugin.PluginBase {
     const threadMainUrl = `${SITE}/threads/${slug}/`;
     try {
       const $thread = await this.fetchPage(threadMainUrl);
-
       const avatarImg = $thread('img[class^="avatar-u"]').first();
       const src = avatarImg.attr('src') || avatarImg.attr('data-src');
       if (src) cover = this.upgradeAvatar(src);
@@ -155,65 +226,38 @@ class QuestionableQuesting implements Plugin.PluginBase {
       chapters: [],
     };
 
-    // --- Threadmark pagination ---
-    const threadmarkStats = $('.threadmarkListingHeader-stats dl.pairs')
-      .filter((_i, el) => $(el).find('dt').text().trim() === 'Threadmarks')
-      .first();
-    const totalCount = parseInt(
-      threadmarkStats.find('dd').text().replace(/,/g, '') || '0',
-      10,
-    );
-    const totalPages = totalCount > 0 ? Math.ceil(totalCount / PER_PAGE) : 1;
+    // --- Discover all threadmark category tabs ---
+    const categories: { label: string; url: string; isMain: boolean }[] = [];
+    $('.block-tabHeader--threadmarkCategoryTabs a.tabs-tab').each((_i, el) => {
+      const href = $(el).attr('href');
+      const label = $(el).text().trim();
+      if (!href) return;
 
-    // --- Chapters ---
-    const allChapters: Plugin.ChapterItem[] = [];
-    for (let page = 1; page <= totalPages; page++) {
-      const pageUrl =
-        page === 1
-          ? threadUrl
-          : `${SITE}/threads/${slug}/threadmarks?per_page=${PER_PAGE}&page=${page}`;
-      const $p = page === 1 ? $ : await this.fetchPage(pageUrl);
+      const fullUrl = href.startsWith('http') ? href : SITE + href;
+      const isMain = !href.includes('threadmark_category=');
 
-      $p('.structItemContainer .structItem--threadmark').each((_i, el) => {
-        const el$ = $p(el);
-        if (el$.hasClass('structItem--threadmark-filler')) return;
+      categories.push({ label, url: fullUrl, isMain });
+    });
 
-        const linkEl = el$.find('.structItem-title a').first();
-        const href = linkEl.attr('href');
-        if (!href) return;
-
-        // --- Date extraction: force integer seconds -> ms ---
-        const timeEl = el$.find('time.structItem-latestDate').first();
-        let releaseTime: number | undefined = undefined;
-
-        const dataTime = timeEl.attr('data-time');
-        if (dataTime && /^\d+$/.test(dataTime)) {
-          const ts = parseInt(dataTime, 10);
-          releaseTime = Math.floor(dataTime.length === 13 ? ts : ts * 1000);
-        } else {
-          const dateStr = timeEl.attr('data-date-string');
-          if (dateStr) {
-            const parts = dateStr.split('/');
-            if (parts.length === 3) {
-              const d = parseInt(parts[0], 10);
-              const m = parseInt(parts[1], 10);
-              const y = parseInt(parts[2], 10);
-              if (!isNaN(d) && !isNaN(m) && !isNaN(y)) {
-                releaseTime = Math.floor(new Date(y, m - 1, d).getTime());
-              }
-            }
-          }
-        }
-
-        allChapters.push({
-          name: linkEl.text().trim(),
-          path: href,
-          releaseTime,
-        });
-      });
+    // Fallback if no tabs found: just use the default URL
+    if (categories.length === 0) {
+      categories.push({ label: 'Threadmarks', url: defaultUrl, isMain: true });
     }
 
-    novel.chapters = allChapters.reverse();
+    // --- Fetch main category chapters (no prefix) ---
+    const mainCat = categories.find(c => c.isMain) || categories[0];
+    const mainChapters = await this.fetchCategory(mainCat.url, '');
+
+    // --- Fetch each extra category with prefix ---
+    const extras: Plugin.ChapterItem[] = [];
+    for (const cat of categories) {
+      if (cat.isMain) continue;
+      const catChapters = await this.fetchCategory(cat.url, cat.label);
+      extras.push(...catChapters);
+    }
+
+    // Main chapters first (oldest → newest), then extras
+    novel.chapters = [...mainChapters.reverse(), ...extras];
     return novel;
   }
 
