@@ -10,7 +10,7 @@ class QuestionableQuesting implements Plugin.PluginBase {
   id = 'questionablequesting';
   name = 'Questionable Questing';
   site = SITE;
-  version = '1.1.5';
+  version = '1.1.6';
   icon = 'src/en/questionablequesting/icon.png';
   author = 'personal';
 
@@ -20,7 +20,6 @@ class QuestionableQuesting implements Plugin.PluginBase {
     return cheerioLoad(body);
   }
 
-  // Upgrade QQ avatar URLs from /s/ or /m/ to /l/ (192x192)
   upgradeAvatar(src: string): string {
     if (!src) return '';
     const upgraded = src.replace(/\/avatars\/[sm]\//, '/avatars/l/');
@@ -33,20 +32,19 @@ class QuestionableQuesting implements Plugin.PluginBase {
 
     const novels: Plugin.NovelItem[] = [];
     $('.structItem--thread').each((_i, el) => {
-      // Skip sticky (pinned) threads
       if ($(el).find('.structItem-status--sticky').length > 0) return;
 
-      // .first() = thread root URL. .last() would be the latest-post URL,
-      // which breaks parseNovel because it points at a single post.
-      const linkEl = $(el).find('.structItem-title a').first();
-      const href = linkEl.attr('href');
+      const links = $(el).find('.structItem-title a');
+      // href from the FIRST link (thread root), title from the LAST (skips [NSFW] prefix)
+      const href = links.first().attr('href');
+      const titleText = links.last().text().trim();
       if (!href) return;
 
       const avatarImg = $(el).find('.structItem-cell--icon img').first();
       const src = avatarImg.attr('src') || avatarImg.attr('data-src');
 
       novels.push({
-        name: linkEl.text().trim(),
+        name: titleText,
         path: href,
         cover: src ? this.upgradeAvatar(src) : undefined,
       });
@@ -84,9 +82,6 @@ class QuestionableQuesting implements Plugin.PluginBase {
   }
 
   async parseNovel(novelPath: string): Promise<Plugin.SourceNovel> {
-    // Normalize any URL shape to a bare slug:
-    // full URL, /threads/slug.123/, /threads/slug.123/post-999,
-    // /threads/slug.123/unread, /threads/slug.123/latest, etc.
     const slug = novelPath
       .replace(/^https?:\/\/[^/]+/, '')
       .replace(/^\/?threads\//, '')
@@ -100,7 +95,7 @@ class QuestionableQuesting implements Plugin.PluginBase {
     const threadUrl = `${SITE}/threads/${slug}/threadmarks?per_page=${PER_PAGE}`;
     const $ = await this.fetchPage(threadUrl);
 
-    // --- Title (strip labels/unread badges) ---
+    // --- Title ---
     const titleEl = $('.p-title-value').first();
     titleEl.find('.unreadLink, .labelLink, .label, .label-append').remove();
     const title =
@@ -111,7 +106,7 @@ class QuestionableQuesting implements Plugin.PluginBase {
     // --- Author ---
     const author = $('.username').first().text().trim() || 'Unknown';
 
-    // --- Fetch main thread page for avatar + summary ---
+    // --- Avatar + summary from main thread page ---
     let cover = '';
     let summary = '';
     const threadMainUrl = `${SITE}/threads/${slug}/`;
@@ -167,20 +162,25 @@ class QuestionableQuesting implements Plugin.PluginBase {
         const href = linkEl.attr('href');
         if (!href) return;
 
-        // --- Date extraction with fallbacks ---
         const timeEl = el$.find('time.structItem-latestDate').first();
         let releaseTime: number | undefined = undefined;
 
         const dataTime = timeEl.attr('data-time');
         if (dataTime && /^\d+$/.test(dataTime)) {
           const ts = parseInt(dataTime, 10);
-          // 13 digits = already milliseconds, 10 digits = seconds
           releaseTime = dataTime.length === 13 ? ts : ts * 1000;
         } else {
           const dateStr = timeEl.attr('data-date-string');
           if (dateStr) {
-            const parsed = Date.parse(dateStr.split('/').reverse().join('-'));
-            if (!isNaN(parsed)) releaseTime = parsed;
+            const parts = dateStr.split('/');
+            if (parts.length === 3) {
+              const d = parseInt(parts[0], 10);
+              const m = parseInt(parts[1], 10);
+              const y = parseInt(parts[2], 10);
+              if (!isNaN(d) && !isNaN(m) && !isNaN(y)) {
+                releaseTime = new Date(y, m - 1, d).getTime();
+              }
+            }
           }
         }
 
