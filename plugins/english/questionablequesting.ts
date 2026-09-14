@@ -10,7 +10,7 @@ class QuestionableQuesting implements Plugin.PluginBase {
   id = 'questionablequesting';
   name = 'Questionable Questing';
   site = SITE;
-  version = '1.2.1';
+  version = '1.2.2';
   icon = 'src/en/questionablequesting/icon.png';
   author = 'personal';
 
@@ -24,6 +24,11 @@ class QuestionableQuesting implements Plugin.PluginBase {
     if (!src) return '';
     const upgraded = src.replace(/\/avatars\/[sm]\//, '/avatars/l/');
     return upgraded.startsWith('http') ? upgraded : SITE + upgraded;
+  }
+
+  // Strip XenForo thread-title prefixes like [NSFW], [Quest], etc.
+  stripTitlePrefix(title: string): string {
+    return title.replace(/^\[(NSFW|Quest|CYOA)\]\s*/i, '').trim();
   }
 
   pickThreadRoot(hrefs: (string | undefined)[]): string | undefined {
@@ -45,7 +50,7 @@ class QuestionableQuesting implements Plugin.PluginBase {
       if ($(el).find('.structItem-status--sticky').length > 0) return;
 
       const links = $(el).find('.structItem-title a');
-      const titleText = links.last().text().trim();
+      const titleText = this.stripTitlePrefix(links.last().text().trim());
 
       const hrefs: (string | undefined)[] = [];
       links.each((_j, a) => {
@@ -86,7 +91,7 @@ class QuestionableQuesting implements Plugin.PluginBase {
       const src = avatarImg.attr('src') || avatarImg.attr('data-src');
 
       novels.push({
-        name: linkEl.text().trim(),
+        name: this.stripTitlePrefix(linkEl.text().trim()),
         path: href,
         cover: src ? this.upgradeAvatar(src) : undefined,
       });
@@ -114,8 +119,6 @@ class QuestionableQuesting implements Plugin.PluginBase {
 
       const dataTime = timeEl.attr('data-time');
       if (dataTime && /^\d+$/.test(dataTime)) {
-        // XenForo data-time is always 10-digit Unix seconds.
-        // LNReader plugin host expects a Date object.
         releaseTime = new Date(parseInt(dataTime, 10) * 1000);
       } else {
         const dateStr = timeEl.attr('data-date-string');
@@ -142,11 +145,17 @@ class QuestionableQuesting implements Plugin.PluginBase {
     const stats = $page('.threadmarkListingHeader-stats dl.pairs')
       .filter((_i, el) => $page(el).find('dt').text().trim() === 'Threadmarks')
       .first();
-    const count = parseInt(stats.find('dd').text().replace(/,/g, '') || '0', 10);
+    const count = parseInt(
+      stats.find('dd').text().replace(/,/g, '') || '0',
+      10,
+    );
     return { count, pages: count > 0 ? Math.ceil(count / PER_PAGE) : 1 };
   }
 
-  async fetchCategory(baseUrl: string, prefix: string): Promise<Plugin.ChapterItem[]> {
+  async fetchCategory(
+    baseUrl: string,
+    prefix: string,
+  ): Promise<Plugin.ChapterItem[]> {
     const firstUrl = `${baseUrl}${baseUrl.includes('?') ? '&' : '?'}per_page=${PER_PAGE}`;
     const $first = await this.fetchPage(firstUrl);
 
@@ -160,6 +169,37 @@ class QuestionableQuesting implements Plugin.PluginBase {
     }
 
     return chapters;
+  }
+
+  // Clean the OP text into a readable plain-text summary.
+  extractSummary($thread: CheerioAPI): string {
+    const firstPost = $thread('.message:first .bbWrapper').first();
+    if (firstPost.length === 0) return '';
+
+    // Remove quoted posts, spoilers, code blocks, and buttons
+    firstPost
+      .find(
+        '.bbCodeBlock, .bbCodeSpoiler, .bbCodeBlock--quote, button, .bbCodeBlock-expandLink, .bbCodeBlock-shrinkLink',
+      )
+      .remove();
+
+    let html = firstPost.html() || '';
+    html = html
+      .replace(/<\/p>/gi, '\n')
+      .replace(/<br\s*\/?>/gi, '\n')
+      .replace(/<\/div>/gi, '\n')
+      .replace(/<\/li>/gi, '\n')
+      .replace(/<[^>]+>/g, '')
+      .replace(/&nbsp;/g, ' ')
+      .replace(/&amp;/g, '&')
+      .replace(/&lt;/g, '<')
+      .replace(/&gt;/g, '>')
+      .replace(/&quot;/g, '"')
+      .replace(/&#39;/g, "'")
+      .replace(/\n{3,}/g, '\n\n')
+      .trim();
+
+    return html;
   }
 
   async parseNovel(novelPath: string): Promise<Plugin.SourceNovel> {
@@ -176,27 +216,35 @@ class QuestionableQuesting implements Plugin.PluginBase {
     const defaultUrl = `${SITE}/threads/${slug}/threadmarks`;
     const $ = await this.fetchPage(`${defaultUrl}?per_page=${PER_PAGE}`);
 
+    // --- Title (strip prefix + label spans) ---
     const titleEl = $('.p-title-value').first();
     titleEl.find('.unreadLink, .labelLink, .label, .label-append').remove();
-    const title =
+    const rawTitle =
       titleEl.text().trim() ||
       $('meta[property="og:title"]').attr('content') ||
       'Untitled';
+    const title = this.stripTitlePrefix(rawTitle);
 
+    // --- Author ---
     const author = $('.username').first().text().trim() || 'Unknown';
 
+    // --- Avatar + summary from main thread page ---
     let cover = '';
     let summary = '';
     const threadMainUrl = `${SITE}/threads/${slug}/`;
     try {
       const $thread = await this.fetchPage(threadMainUrl);
+
       const avatarImg = $thread('img[class^="avatar-u"]').first();
       const src = avatarImg.attr('src') || avatarImg.attr('data-src');
       if (src) cover = this.upgradeAvatar(src);
 
-      const firstPost = $thread('.message:first .bbWrapper').first();
-      if (firstPost.length > 0) {
-        summary = firstPost.text().trim().slice(0, 300);
+      summary = this.extractSummary($thread).slice(0, 500);
+
+      // Fallback to meta description if summary is too short/empty
+      if (!summary || summary.length < 50) {
+        summary =
+          $('meta[name="description"]').attr('content')?.trim() || summary;
       }
     } catch (_e) {
       // Non-fatal
@@ -212,6 +260,7 @@ class QuestionableQuesting implements Plugin.PluginBase {
       chapters: [],
     };
 
+    // --- Threadmark categories ---
     const categories: { label: string; url: string; isMain: boolean }[] = [];
     $('.block-tabHeader--threadmarkCategoryTabs a.tabs-tab').each((_i, el) => {
       const href = $(el).attr('href');
