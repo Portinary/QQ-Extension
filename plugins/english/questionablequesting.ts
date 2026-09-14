@@ -10,7 +10,7 @@ class QuestionableQuesting implements Plugin.PluginBase {
   id = 'questionablequesting';
   name = 'Questionable Questing';
   site = SITE;
-  version = '1.2.0';
+  version = '1.2.1';
   icon = 'src/en/questionablequesting/icon.png';
   author = 'personal';
 
@@ -109,15 +109,14 @@ class QuestionableQuesting implements Plugin.PluginBase {
       const rawName = linkEl.text().trim();
       const name = prefix ? `${prefix} - ${rawName}` : rawName;
 
-      let releaseTime: string | undefined = undefined;
+      let releaseTime: Date | undefined = undefined;
       const timeEl = el$.find('time.structItem-latestDate').first();
 
       const dataTime = timeEl.attr('data-time');
       if (dataTime && /^\d+$/.test(dataTime)) {
-        // data-time is always 10-digit seconds on XenForo.
-        // Convert to ms and force as a STRING to avoid float coercion.
-        const ts = parseInt(dataTime, 10);
-        releaseTime = String(ts * 1000);
+        // XenForo data-time is always 10-digit Unix seconds.
+        // LNReader plugin host expects a Date object.
+        releaseTime = new Date(parseInt(dataTime, 10) * 1000);
       } else {
         const dateStr = timeEl.attr('data-date-string');
         if (dateStr) {
@@ -127,13 +126,12 @@ class QuestionableQuesting implements Plugin.PluginBase {
             const m = parseInt(parts[1], 10);
             const y = parseInt(parts[2], 10);
             if (!isNaN(d) && !isNaN(m) && !isNaN(y)) {
-              releaseTime = String(new Date(y, m - 1, d).getTime());
+              releaseTime = new Date(y, m - 1, d);
             }
           }
         }
       }
 
-      // Cast to any to satisfy TS, runtime sends string
       chapters.push({ name, path: href, releaseTime: releaseTime as any });
     });
 
