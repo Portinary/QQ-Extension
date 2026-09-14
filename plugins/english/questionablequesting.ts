@@ -10,7 +10,7 @@ class QuestionableQuesting implements Plugin.PluginBase {
   id = 'questionablequesting';
   name = 'Questionable Questing';
   site = SITE;
-  version = '1.1.3';
+  version = '1.1.4';
   icon = 'src/en/questionablequesting/icon.png';
   author = 'personal';
 
@@ -57,7 +57,6 @@ class QuestionableQuesting implements Plugin.PluginBase {
     searchTerm: string,
     page: number = 1,
   ): Promise<Plugin.NovelItem[]> {
-    // XenForo search — restrict to thread titles only
     const url =
       `${SITE}/search/search?keywords=${encodeURIComponent(searchTerm)}` +
       `&t=thread&c[title_only]=1&page=${page}`;
@@ -69,7 +68,6 @@ class QuestionableQuesting implements Plugin.PluginBase {
       const href = linkEl.attr('href');
       if (!href) return;
 
-      // Avatar sits in the search result figure cell
       const avatarImg = $(el).find('.contentRow-figure img').first();
       const src = avatarImg.attr('src') || avatarImg.attr('data-src');
 
@@ -160,11 +158,22 @@ class QuestionableQuesting implements Plugin.PluginBase {
         const href = linkEl.attr('href');
         if (!href) return;
 
+        // --- Date extraction with fallbacks ---
         const timeEl = el$.find('time.structItem-latestDate').first();
+        let releaseTime: number | undefined = undefined;
+
         const dataTime = timeEl.attr('data-time');
-        const releaseTime = dataTime
-          ? parseInt(dataTime, 10) * 1000
-          : undefined;
+        if (dataTime && /^\d+$/.test(dataTime)) {
+          const ts = parseInt(dataTime, 10);
+          // 13 digits = already milliseconds, 10 digits = seconds
+          releaseTime = dataTime.length === 13 ? ts : ts * 1000;
+        } else {
+          const dateStr = timeEl.attr('data-date-string');
+          if (dateStr) {
+            const parsed = Date.parse(dateStr.split('/').reverse().join('-'));
+            if (!isNaN(parsed)) releaseTime = parsed;
+          }
+        }
 
         allChapters.push({
           name: linkEl.text().trim(),
@@ -195,7 +204,7 @@ class QuestionableQuesting implements Plugin.PluginBase {
     if (body.length === 0) body = $('.bbWrapper').first();
 
     body.find('.bbCodeBlock-expandLink, .bbCodeBlock-shrinkLink').remove();
-    body.find('.bbCodeSpoiler button').remove();
+    body.find('.bbCodeBlockSpoiler button').remove();
 
     body.find('img').each((_i, el) => {
       const src = $(el).attr('src');
