@@ -10,7 +10,7 @@ class QuestionableQuesting implements Plugin.PluginBase {
   id = 'questionablequesting';
   name = 'Questionable Questing';
   site = SITE;
-  version = '1.1.8';
+  version = '1.2.0';
   icon = 'src/en/questionablequesting/icon.png';
   author = 'personal';
 
@@ -95,7 +95,6 @@ class QuestionableQuesting implements Plugin.PluginBase {
     return novels;
   }
 
-  // Extract chapters from one threadmarks page, with optional prefix
   extractChapters($page: CheerioAPI, prefix: string): Plugin.ChapterItem[] {
     const chapters: Plugin.ChapterItem[] = [];
 
@@ -110,13 +109,15 @@ class QuestionableQuesting implements Plugin.PluginBase {
       const rawName = linkEl.text().trim();
       const name = prefix ? `${prefix} - ${rawName}` : rawName;
 
+      let releaseTime: string | undefined = undefined;
       const timeEl = el$.find('time.structItem-latestDate').first();
-      let releaseTime: number | undefined = undefined;
 
       const dataTime = timeEl.attr('data-time');
       if (dataTime && /^\d+$/.test(dataTime)) {
+        // data-time is always 10-digit seconds on XenForo.
+        // Convert to ms and force as a STRING to avoid float coercion.
         const ts = parseInt(dataTime, 10);
-        releaseTime = Math.floor(dataTime.length === 13 ? ts : ts * 1000);
+        releaseTime = String(ts * 1000);
       } else {
         const dateStr = timeEl.attr('data-date-string');
         if (dateStr) {
@@ -126,38 +127,28 @@ class QuestionableQuesting implements Plugin.PluginBase {
             const m = parseInt(parts[1], 10);
             const y = parseInt(parts[2], 10);
             if (!isNaN(d) && !isNaN(m) && !isNaN(y)) {
-              releaseTime = Math.floor(new Date(y, m - 1, d).getTime());
+              releaseTime = String(new Date(y, m - 1, d).getTime());
             }
           }
         }
       }
 
-      chapters.push({ name, path: href, releaseTime });
+      // Cast to any to satisfy TS, runtime sends string
+      chapters.push({ name, path: href, releaseTime: releaseTime as any });
     });
 
     return chapters;
   }
 
-  // Read "Threadmarks: N" header to compute total pages
-  countChaptersAndPages($page: CheerioAPI): {
-    count: number;
-    pages: number;
-  } {
+  countChaptersAndPages($page: CheerioAPI): { count: number; pages: number } {
     const stats = $page('.threadmarkListingHeader-stats dl.pairs')
       .filter((_i, el) => $page(el).find('dt').text().trim() === 'Threadmarks')
       .first();
-    const count = parseInt(
-      stats.find('dd').text().replace(/,/g, '') || '0',
-      10,
-    );
+    const count = parseInt(stats.find('dd').text().replace(/,/g, '') || '0', 10);
     return { count, pages: count > 0 ? Math.ceil(count / PER_PAGE) : 1 };
   }
 
-  // Fetch one category fully (with pagination), returns all chapters
-  async fetchCategory(
-    baseUrl: string,
-    prefix: string,
-  ): Promise<Plugin.ChapterItem[]> {
+  async fetchCategory(baseUrl: string, prefix: string): Promise<Plugin.ChapterItem[]> {
     const firstUrl = `${baseUrl}${baseUrl.includes('?') ? '&' : '?'}per_page=${PER_PAGE}`;
     const $first = await this.fetchPage(firstUrl);
 
@@ -187,7 +178,6 @@ class QuestionableQuesting implements Plugin.PluginBase {
     const defaultUrl = `${SITE}/threads/${slug}/threadmarks`;
     const $ = await this.fetchPage(`${defaultUrl}?per_page=${PER_PAGE}`);
 
-    // --- Title ---
     const titleEl = $('.p-title-value').first();
     titleEl.find('.unreadLink, .labelLink, .label, .label-append').remove();
     const title =
@@ -195,10 +185,8 @@ class QuestionableQuesting implements Plugin.PluginBase {
       $('meta[property="og:title"]').attr('content') ||
       'Untitled';
 
-    // --- Author ---
     const author = $('.username').first().text().trim() || 'Unknown';
 
-    // --- Avatar + summary from main thread page ---
     let cover = '';
     let summary = '';
     const threadMainUrl = `${SITE}/threads/${slug}/`;
@@ -226,7 +214,6 @@ class QuestionableQuesting implements Plugin.PluginBase {
       chapters: [],
     };
 
-    // --- Discover all threadmark category tabs ---
     const categories: { label: string; url: string; isMain: boolean }[] = [];
     $('.block-tabHeader--threadmarkCategoryTabs a.tabs-tab').each((_i, el) => {
       const href = $(el).attr('href');
@@ -239,16 +226,13 @@ class QuestionableQuesting implements Plugin.PluginBase {
       categories.push({ label, url: fullUrl, isMain });
     });
 
-    // Fallback if no tabs found: just use the default URL
     if (categories.length === 0) {
       categories.push({ label: 'Threadmarks', url: defaultUrl, isMain: true });
     }
 
-    // --- Fetch main category chapters (no prefix) ---
     const mainCat = categories.find(c => c.isMain) || categories[0];
     const mainChapters = await this.fetchCategory(mainCat.url, '');
 
-    // --- Fetch each extra category with prefix ---
     const extras: Plugin.ChapterItem[] = [];
     for (const cat of categories) {
       if (cat.isMain) continue;
@@ -256,7 +240,6 @@ class QuestionableQuesting implements Plugin.PluginBase {
       extras.push(...catChapters);
     }
 
-    // Main chapters first (oldest → newest), then extras
     novel.chapters = [...mainChapters.reverse(), ...extras];
     return novel;
   }
