@@ -10,7 +10,7 @@ class QuestionableQuesting implements Plugin.PluginBase {
   id = 'questionablequesting';
   name = 'Questionable Questing';
   site = SITE;
-  version = '1.3.5.3';
+  version = '1.3.5.4';
   icon = 'src/en/questionablequesting/icon.png';
   author = 'personal';
 
@@ -30,6 +30,7 @@ class QuestionableQuesting implements Plugin.PluginBase {
     return title.replace(/^\[(NSFW|Quest|CYOA)\]\s*/i, '').trim();
   }
 
+  // Clean /unread, /latest, /post-N, and query strings from a thread URL.
   normalizeThreadUrl(href: string): string {
     if (!href) return href;
     let h = href;
@@ -41,18 +42,6 @@ class QuestionableQuesting implements Plugin.PluginBase {
     return h;
   }
 
-  pickThreadRoot(hrefs: (string | undefined)[]): string | undefined {
-    for (const h of hrefs) {
-      if (!h) continue;
-      if (!/\/(unread|latest)(\/|$|\?)/.test(h) && !/\/post-\d+/.test(h)) {
-        return this.normalizeThreadUrl(h);
-      }
-    }
-    if (hrefs[0]) return this.normalizeThreadUrl(hrefs[0]);
-    return undefined;
-  }
-
-  // 1.2.0 style (no pickThreadRoot, no normalizeThreadUrl) + stripTitlePrefix + pagination
   async popularNovels(page: number = 1): Promise<Plugin.NovelItem[]> {
     const rawPage = Number(page);
     const safePage =
@@ -67,8 +56,11 @@ class QuestionableQuesting implements Plugin.PluginBase {
       if ($(el).find('.structItem-status--sticky').length > 0) return;
 
       const linkEl = $(el).find('.structItem-title a').last();
-      const href = linkEl.attr('href');
-      if (!href) return;
+      const rawHref = linkEl.attr('href');
+      if (!rawHref) return;
+
+      // Same href we'd use anyway — just cleaned of /unread and query suffixes.
+      const href = this.normalizeThreadUrl(rawHref);
 
       const avatarImg = $(el).find('.structItem-cell--icon img').first();
       const src = avatarImg.attr('src') || avatarImg.attr('data-src');
