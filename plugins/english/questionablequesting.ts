@@ -10,7 +10,7 @@ class QuestionableQuesting implements Plugin.PluginBase {
   id = 'questionablequesting';
   name = 'Questionable Questing';
   site = SITE;
-  version = '1.3.5';
+  version = '1.3.6';
   icon = 'src/en/questionablequesting/icon.png';
   author = 'personal';
 
@@ -53,15 +53,11 @@ class QuestionableQuesting implements Plugin.PluginBase {
   }
 
   async popularNovels(page: number = 1): Promise<Plugin.NovelItem[]> {
-    // Coerce whatever the host gives us into a safe integer >= 1.
-    // Handles: undefined, null, 0, NaN, "1", "2", "abc".
     const rawPage = Number(page);
     const safePage =
       Number.isFinite(rawPage) && rawPage > 1 ? Math.floor(rawPage) : 1;
 
     const baseUrl = `${SITE}/forums/nsfw-creative-writing.${NSFW_CREATIVE_WRITING_ID}`;
-    // Page 1: root with trailing slash (canonical XenForo).
-    // Page N>=2: /page-N with NO trailing slash (confirmed from browser URL).
     const url = safePage === 1 ? `${baseUrl}/` : `${baseUrl}/page-${safePage}`;
 
     const $ = await this.fetchPage(url);
@@ -82,11 +78,12 @@ class QuestionableQuesting implements Plugin.PluginBase {
 
       const avatarImg = $(el).find('.structItem-cell--icon img').first();
       const src = avatarImg.attr('src') || avatarImg.attr('data-src');
+      const cover = src ? this.upgradeAvatar(src) : '';
 
       novels.push({
         name: titleText,
         path: href,
-        cover: src ? this.upgradeAvatar(src) : undefined,
+        cover,
       });
     });
 
@@ -104,11 +101,12 @@ class QuestionableQuesting implements Plugin.PluginBase {
 
       const avatarImg = $(el).find('.contentRow-figure img').first();
       const src = avatarImg.attr('src') || avatarImg.attr('data-src');
+      const cover = src ? this.upgradeAvatar(src) : '';
 
       novels.push({
         name: this.stripTitlePrefix(linkEl.text().trim()),
         path: this.normalizeThreadUrl(href),
-        cover: src ? this.upgradeAvatar(src) : undefined,
+        cover,
       });
     });
 
@@ -165,6 +163,7 @@ class QuestionableQuesting implements Plugin.PluginBase {
       const rawName = linkEl.text().trim();
       const name = prefix ? `${prefix} - ${rawName}` : rawName;
 
+      // releaseTime is ALWAYS a Date object, or the field is omitted.
       let releaseTime: Date | undefined = undefined;
       const timeEl = el$.find('time.structItem-latestDate').first();
 
@@ -186,7 +185,11 @@ class QuestionableQuesting implements Plugin.PluginBase {
         }
       }
 
-      chapters.push({ name, path: href, releaseTime: releaseTime as any });
+      if (releaseTime) {
+        chapters.push({ name, path: href, releaseTime: releaseTime as any });
+      } else {
+        chapters.push({ name, path: href });
+      }
     });
 
     return chapters;
@@ -351,7 +354,6 @@ class QuestionableQuesting implements Plugin.PluginBase {
     let body = post.find('.bbWrapper').first();
     if (body.length === 0) body = $('.bbWrapper').first();
 
-    // Fix lazy-loaded images (including inside spoilers)
     body.find('img').each((_i, el) => {
       const $img = $(el);
       const realSrc =
@@ -369,7 +371,6 @@ class QuestionableQuesting implements Plugin.PluginBase {
       }
     });
 
-    // Unwrap spoilers into readable inline content
     body.find('.bbCodeSpoiler').each((_i, el) => {
       const $spoiler = $(el);
       const $button = $spoiler.find('.bbCodeSpoiler-button').first();
