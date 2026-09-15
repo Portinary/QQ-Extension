@@ -10,7 +10,7 @@ class QuestionableQuesting implements Plugin.PluginBase {
   id = 'questionablequesting';
   name = 'Questionable Questing';
   site = SITE;
-  version = '1.2.9';
+  version = '1.2.10';
   icon = 'src/en/questionablequesting/icon.png';
   author = 'personal';
 
@@ -54,7 +54,9 @@ class QuestionableQuesting implements Plugin.PluginBase {
 
   async popularNovels(page: number = 1): Promise<Plugin.NovelItem[]> {
     const baseUrl = `${SITE}/forums/nsfw-creative-writing.${NSFW_CREATIVE_WRITING_ID}`;
-    const url = page === 1 ? `${baseUrl}/` : `${baseUrl}/page-${page}/`;
+    // Page 1: base URL with trailing slash.
+    // Page N: /page-N with NO trailing slash (XenForo's canonical form).
+    const url = page === 1 ? `${baseUrl}/` : `${baseUrl}/page-${page}`;
     const $ = await this.fetchPage(url);
 
     const novels: Plugin.NovelItem[] = [];
@@ -360,17 +362,7 @@ class QuestionableQuesting implements Plugin.PluginBase {
       }
     });
 
-    // --- Make spoilers readable ---
-    // Strategy: unwrap spoiler containers so content flows inline.
-    // XenForo spoilers look like:
-    //   <div class="bbCodeSpoiler">
-    //     <button class="bbCodeSpoiler-button">Spoiler: <span>Title</span></button>
-    //     <div class="bbCodeSpoiler-content">
-    //       <div class="bbCodeBlock bbCodeBlock--spoiler">
-    //         <div class="bbCodeBlock-content">...actual content...</div>
-    //       </div>
-    //     </div>
-    //   </div>
+    // --- Unwrap spoilers into readable inline content ---
     body.find('.bbCodeSpoiler').each((_i, el) => {
       const $spoiler = $(el);
       const $button = $spoiler.find('.bbCodeSpoiler-button').first();
@@ -382,13 +374,10 @@ class QuestionableQuesting implements Plugin.PluginBase {
         return;
       }
 
-      // Build a readable replacement: <p><strong>[Spoiler: Label]</strong></p>
-      // followed by the content directly in the flow.
       const heading = label
         ? `<p><strong>[Spoiler: ${label}]</strong></p>`
         : `<p><strong>[Spoiler]</strong></p>`;
 
-      // Replace the entire spoiler with heading + inner content
       $spoiler.replaceWith(heading + $content.html());
     });
 
