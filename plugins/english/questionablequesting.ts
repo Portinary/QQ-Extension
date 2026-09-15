@@ -10,7 +10,7 @@ class QuestionableQuesting implements Plugin.PluginBase {
   id = 'questionablequesting';
   name = 'Questionable Questing';
   site = SITE;
-  version = '1.3.6';
+  version = '1.3.5.1';
   icon = 'src/en/questionablequesting/icon.png';
   author = 'personal';
 
@@ -52,14 +52,10 @@ class QuestionableQuesting implements Plugin.PluginBase {
     return undefined;
   }
 
-  async popularNovels(page: number = 1): Promise<Plugin.NovelItem[]> {
-    const rawPage = Number(page);
-    const safePage =
-      Number.isFinite(rawPage) && rawPage > 1 ? Math.floor(rawPage) : 1;
-
-    const baseUrl = `${SITE}/forums/nsfw-creative-writing.${NSFW_CREATIVE_WRITING_ID}`;
-    const url = safePage === 1 ? `${baseUrl}/` : `${baseUrl}/page-${safePage}`;
-
+  // Page 1 only. No pagination, no page parameter respected.
+  // Always fetches the forum root and returns those ~20 latest threads.
+  async popularNovels(): Promise<Plugin.NovelItem[]> {
+    const url = `${SITE}/forums/nsfw-creative-writing.${NSFW_CREATIVE_WRITING_ID}/`;
     const $ = await this.fetchPage(url);
 
     const novels: Plugin.NovelItem[] = [];
@@ -80,11 +76,7 @@ class QuestionableQuesting implements Plugin.PluginBase {
       const src = avatarImg.attr('src') || avatarImg.attr('data-src');
       const cover = src ? this.upgradeAvatar(src) : '';
 
-      novels.push({
-        name: titleText,
-        path: href,
-        cover,
-      });
+      novels.push({ name: titleText, path: href, cover });
     });
 
     return novels;
@@ -163,7 +155,6 @@ class QuestionableQuesting implements Plugin.PluginBase {
       const rawName = linkEl.text().trim();
       const name = prefix ? `${prefix} - ${rawName}` : rawName;
 
-      // releaseTime is ALWAYS a Date object, or the field is omitted.
       let releaseTime: Date | undefined = undefined;
       const timeEl = el$.find('time.structItem-latestDate').first();
 
