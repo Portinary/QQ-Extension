@@ -10,7 +10,7 @@ class QuestionableQuesting implements Plugin.PluginBase {
   id = 'questionablequesting';
   name = 'Questionable Questing';
   site = SITE;
-  version = '1.3.5.2';
+  version = '1.3.5.3';
   icon = 'src/en/questionablequesting/icon.png';
   author = 'personal';
 
@@ -52,11 +52,14 @@ class QuestionableQuesting implements Plugin.PluginBase {
     return undefined;
   }
 
-  // ===== 1.2.0 VERBATIM popularNovels =====
-  // No page parameter. .last() for the link. No stripTitlePrefix.
-  // No pickThreadRoot. No normalizeThreadUrl. Cover only when src exists.
-  async popularNovels(): Promise<Plugin.NovelItem[]> {
-    const url = `${SITE}/forums/nsfw-creative-writing.${NSFW_CREATIVE_WRITING_ID}/`;
+  // 1.2.0 style (no pickThreadRoot, no normalizeThreadUrl) + stripTitlePrefix + pagination
+  async popularNovels(page: number = 1): Promise<Plugin.NovelItem[]> {
+    const rawPage = Number(page);
+    const safePage =
+      Number.isFinite(rawPage) && rawPage > 1 ? Math.floor(rawPage) : 1;
+
+    const baseUrl = `${SITE}/forums/nsfw-creative-writing.${NSFW_CREATIVE_WRITING_ID}`;
+    const url = safePage === 1 ? `${baseUrl}/` : `${baseUrl}/page-${safePage}`;
     const $ = await this.fetchPage(url);
 
     const novels: Plugin.NovelItem[] = [];
@@ -71,7 +74,7 @@ class QuestionableQuesting implements Plugin.PluginBase {
       const src = avatarImg.attr('src') || avatarImg.attr('data-src');
 
       novels.push({
-        name: linkEl.text().trim(),
+        name: this.stripTitlePrefix(linkEl.text().trim()),
         path: href,
         cover: src ? this.upgradeAvatar(src) : undefined,
       });
