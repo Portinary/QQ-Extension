@@ -10,7 +10,7 @@ class QuestionableQuesting implements Plugin.PluginBase {
   id = 'questionablequesting';
   name = 'Questionable Questing';
   site = SITE;
-  version = '1.2.6';
+  version = '1.2.7';
   icon = 'src/en/questionablequesting/icon.png';
   author = 'personal';
 
@@ -30,14 +30,33 @@ class QuestionableQuesting implements Plugin.PluginBase {
     return title.replace(/^\[(NSFW|Quest|CYOA)\]\s*/i, '').trim();
   }
 
+  // Force any thread URL into canonical /threads/<slug>.<id>/ form.
+  // Handles: /unread, /unread?new=1, /latest, /post-NNNN, query strings.
+  normalizeThreadUrl(href: string): string {
+    if (!href) return href;
+    let h = href;
+    // Strip /unread, /latest, /post-NNNN and anything after them
+    h = h.replace(/\/unread(\/|\?|$).*$/, '/');
+    h = h.replace(/\/latest(\/|\?|$).*$/, '/');
+    h = h.replace(/\/post-\d+.*$/, '/');
+    // Strip trailing query strings on the root
+    h = h.replace(/\?.*$/, '');
+    // Ensure trailing slash
+    if (!h.endsWith('/')) h += '/';
+    return h;
+  }
+
   pickThreadRoot(hrefs: (string | undefined)[]): string | undefined {
+    // First pass: find a clean root link
     for (const h of hrefs) {
       if (!h) continue;
-      if (!/\/(unread|latest)(\/|$)/.test(h) && !/\/post-\d+/.test(h)) {
-        return h;
+      if (!/\/(unread|latest)(\/|$|\?)/.test(h) && !/\/post-\d+/.test(h)) {
+        return this.normalizeThreadUrl(h);
       }
     }
-    return hrefs[0];
+    // Fallback: take the first href and force it into clean form
+    if (hrefs[0]) return this.normalizeThreadUrl(hrefs[0]);
+    return undefined;
   }
 
   async popularNovels(page: number = 1): Promise<Plugin.NovelItem[]> {
@@ -72,7 +91,6 @@ class QuestionableQuesting implements Plugin.PluginBase {
     return novels;
   }
 
-  // Internal: one XenForo search query. Returns parsed novels.
   async runSearch(url: string): Promise<Plugin.NovelItem[]> {
     const $ = await this.fetchPage(url);
     const novels: Plugin.NovelItem[] = [];
@@ -87,7 +105,7 @@ class QuestionableQuesting implements Plugin.PluginBase {
 
       novels.push({
         name: this.stripTitlePrefix(linkEl.text().trim()),
-        path: href,
+        path: this.normalizeThreadUrl(href),
         cover: src ? this.upgradeAvatar(src) : undefined,
       });
     });
@@ -107,9 +125,7 @@ class QuestionableQuesting implements Plugin.PluginBase {
       `&t=thread&c[title_only]=1&page=${page}`;
     const titleResults = await this.runSearch(titleUrl);
 
-    // 2) If single-word search on page 1, also try an exact author match.
-    //    XenForo user search requires an exact username (no wildcards),
-    //    so "dragon" only matches an author literally named "dragon".
+    // 2) Single-word term on page 1 -> also try exact author search
     const isSingleWord = !term.includes(' ') && term.length > 0;
     if (!isSingleWord || page !== 1) return titleResults;
 
@@ -123,7 +139,7 @@ class QuestionableQuesting implements Plugin.PluginBase {
       authorResults = [];
     }
 
-    // 3) Merge, dedupe by path, keep title results first
+    // 3) Merge, dedupe by path (canonical form)
     const seen = new Set<string>();
     const merged: Plugin.NovelItem[] = [];
 
