@@ -10,7 +10,7 @@ class QuestionableQuesting implements Plugin.PluginBase {
   id = 'questionablequesting';
   name = 'Questionable Questing';
   site = SITE;
-  version = '1.2.5';
+  version = '1.2.6';
   icon = 'src/en/questionablequesting/icon.png';
   author = 'personal';
 
@@ -47,7 +47,6 @@ class QuestionableQuesting implements Plugin.PluginBase {
 
     const novels: Plugin.NovelItem[] = [];
     $('.structItem--thread').each((_i, el) => {
-      // Sticky threads only appear on page 1; this check is a no-op on later pages
       if ($(el).find('.structItem-status--sticky').length > 0) return;
 
       const links = $(el).find('.structItem-title a');
@@ -73,16 +72,11 @@ class QuestionableQuesting implements Plugin.PluginBase {
     return novels;
   }
 
-  async searchNovels(
-    searchTerm: string,
-    page: number = 1,
-  ): Promise<Plugin.NovelItem[]> {
-    const url =
-      `${SITE}/search/search?keywords=${encodeURIComponent(searchTerm)}` +
-      `&t=thread&c[title_only]=1&page=${page}`;
+  // Internal: one XenForo search query. Returns parsed novels.
+  async runSearch(url: string): Promise<Plugin.NovelItem[]> {
     const $ = await this.fetchPage(url);
-
     const novels: Plugin.NovelItem[] = [];
+
     $('.contentRow').each((_i, el) => {
       const linkEl = $(el).find('.contentRow-title a').first();
       const href = linkEl.attr('href');
@@ -99,6 +93,47 @@ class QuestionableQuesting implements Plugin.PluginBase {
     });
 
     return novels;
+  }
+
+  async searchNovels(
+    searchTerm: string,
+    page: number = 1,
+  ): Promise<Plugin.NovelItem[]> {
+    const term = searchTerm.trim();
+
+    // 1) Normal title search
+    const titleUrl =
+      `${SITE}/search/search?keywords=${encodeURIComponent(term)}` +
+      `&t=thread&c[title_only]=1&page=${page}`;
+    const titleResults = await this.runSearch(titleUrl);
+
+    // 2) If single-word search on page 1, also try an exact author match.
+    //    XenForo user search requires an exact username (no wildcards),
+    //    so "dragon" only matches an author literally named "dragon".
+    const isSingleWord = !term.includes(' ') && term.length > 0;
+    if (!isSingleWord || page !== 1) return titleResults;
+
+    const authorUrl =
+      `${SITE}/search/search?users=${encodeURIComponent(term)}` +
+      `&user_content=thread`;
+    let authorResults: Plugin.NovelItem[] = [];
+    try {
+      authorResults = await this.runSearch(authorUrl);
+    } catch (_e) {
+      authorResults = [];
+    }
+
+    // 3) Merge, dedupe by path, keep title results first
+    const seen = new Set<string>();
+    const merged: Plugin.NovelItem[] = [];
+
+    for (const n of [...titleResults, ...authorResults]) {
+      if (!n.path || seen.has(n.path)) continue;
+      seen.add(n.path);
+      merged.push(n);
+    }
+
+    return merged;
   }
 
   extractChapters($page: CheerioAPI, prefix: string): Plugin.ChapterItem[] {
