@@ -10,7 +10,7 @@ class QuestionableQuesting implements Plugin.PluginBase {
   id = 'questionablequesting';
   name = 'Questionable Questing';
   site = SITE;
-  version = '1.3.1';
+  version = '1.2.4.1';
   icon = 'src/en/questionablequesting/icon.png';
   author = 'personal';
 
@@ -52,7 +52,9 @@ class QuestionableQuesting implements Plugin.PluginBase {
     return undefined;
   }
 
-  // No pagination — always fetch the forum root (page 1).
+  // ===== 1.2.4 ORIGINAL popularNovels BEHAVIOR =====
+  // No page parameter. Always fetches the forum root.
+  // Cover only set when a src exists (no fallback to '').
   async popularNovels(): Promise<Plugin.NovelItem[]> {
     const url = `${SITE}/forums/nsfw-creative-writing.${NSFW_CREATIVE_WRITING_ID}/`;
     const $ = await this.fetchPage(url);
@@ -74,11 +76,16 @@ class QuestionableQuesting implements Plugin.PluginBase {
       const avatarImg = $(el).find('.structItem-cell--icon img').first();
       const src = avatarImg.attr('src') || avatarImg.attr('data-src');
 
-      novels.push({
-        name: titleText,
-        path: href,
-        cover: src ? this.upgradeAvatar(src) : '',
-      });
+      // Only attach cover when we have a real URL — matches 1.2.4
+      if (src) {
+        novels.push({
+          name: titleText,
+          path: href,
+          cover: this.upgradeAvatar(src),
+        });
+      } else {
+        novels.push({ name: titleText, path: href });
+      }
     });
 
     return novels;
@@ -96,11 +103,18 @@ class QuestionableQuesting implements Plugin.PluginBase {
       const avatarImg = $(el).find('.contentRow-figure img').first();
       const src = avatarImg.attr('src') || avatarImg.attr('data-src');
 
-      novels.push({
-        name: this.stripTitlePrefix(linkEl.text().trim()),
-        path: this.normalizeThreadUrl(href),
-        cover: src ? this.upgradeAvatar(src) : '',
-      });
+      if (src) {
+        novels.push({
+          name: this.stripTitlePrefix(linkEl.text().trim()),
+          path: this.normalizeThreadUrl(href),
+          cover: this.upgradeAvatar(src),
+        });
+      } else {
+        novels.push({
+          name: this.stripTitlePrefix(linkEl.text().trim()),
+          path: this.normalizeThreadUrl(href),
+        });
+      }
     });
 
     return novels;
@@ -342,7 +356,6 @@ class QuestionableQuesting implements Plugin.PluginBase {
     let body = post.find('.bbWrapper').first();
     if (body.length === 0) body = $('.bbWrapper').first();
 
-    // Fix lazy-loaded images (including inside spoilers)
     body.find('img').each((_i, el) => {
       const $img = $(el);
       const realSrc =
@@ -360,7 +373,6 @@ class QuestionableQuesting implements Plugin.PluginBase {
       }
     });
 
-    // Unwrap spoilers into readable inline content
     body.find('.bbCodeSpoiler').each((_i, el) => {
       const $spoiler = $(el);
       const $button = $spoiler.find('.bbCodeSpoiler-button').first();
