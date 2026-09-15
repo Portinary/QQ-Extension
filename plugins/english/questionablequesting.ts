@@ -10,7 +10,7 @@ class QuestionableQuesting implements Plugin.PluginBase {
   id = 'questionablequesting';
   name = 'Questionable Questing';
   site = SITE;
-  version = '1.2.7';
+  version = '1.2.8';
   icon = 'src/en/questionablequesting/icon.png';
   author = 'personal';
 
@@ -30,31 +30,24 @@ class QuestionableQuesting implements Plugin.PluginBase {
     return title.replace(/^\[(NSFW|Quest|CYOA)\]\s*/i, '').trim();
   }
 
-  // Force any thread URL into canonical /threads/<slug>.<id>/ form.
-  // Handles: /unread, /unread?new=1, /latest, /post-NNNN, query strings.
   normalizeThreadUrl(href: string): string {
     if (!href) return href;
     let h = href;
-    // Strip /unread, /latest, /post-NNNN and anything after them
     h = h.replace(/\/unread(\/|\?|$).*$/, '/');
     h = h.replace(/\/latest(\/|\?|$).*$/, '/');
     h = h.replace(/\/post-\d+.*$/, '/');
-    // Strip trailing query strings on the root
     h = h.replace(/\?.*$/, '');
-    // Ensure trailing slash
     if (!h.endsWith('/')) h += '/';
     return h;
   }
 
   pickThreadRoot(hrefs: (string | undefined)[]): string | undefined {
-    // First pass: find a clean root link
     for (const h of hrefs) {
       if (!h) continue;
       if (!/\/(unread|latest)(\/|$|\?)/.test(h) && !/\/post-\d+/.test(h)) {
         return this.normalizeThreadUrl(h);
       }
     }
-    // Fallback: take the first href and force it into clean form
     if (hrefs[0]) return this.normalizeThreadUrl(hrefs[0]);
     return undefined;
   }
@@ -119,13 +112,11 @@ class QuestionableQuesting implements Plugin.PluginBase {
   ): Promise<Plugin.NovelItem[]> {
     const term = searchTerm.trim();
 
-    // 1) Normal title search
     const titleUrl =
       `${SITE}/search/search?keywords=${encodeURIComponent(term)}` +
       `&t=thread&c[title_only]=1&page=${page}`;
     const titleResults = await this.runSearch(titleUrl);
 
-    // 2) Single-word term on page 1 -> also try exact author search
     const isSingleWord = !term.includes(' ') && term.length > 0;
     if (!isSingleWord || page !== 1) return titleResults;
 
@@ -139,7 +130,6 @@ class QuestionableQuesting implements Plugin.PluginBase {
       authorResults = [];
     }
 
-    // 3) Merge, dedupe by path (canonical form)
     const seen = new Set<string>();
     const merged: Plugin.NovelItem[] = [];
 
@@ -332,7 +322,9 @@ class QuestionableQuesting implements Plugin.PluginBase {
       extras.push(...catChapters);
     }
 
-    novel.chapters = [...mainChapters.reverse(), ...extras];
+    // QQ serves threadmarks oldest-first (Chapter 1 at top).
+    // Keep that order for main chapters, then append extras in their own order.
+    novel.chapters = [...mainChapters, ...extras];
     return novel;
   }
 
