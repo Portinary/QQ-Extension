@@ -10,7 +10,7 @@ class QuestionableQuesting implements Plugin.PluginBase {
   id = 'questionablequesting';
   name = 'Questionable Questing';
   site = SITE;
-  version = '1.2.4.1';
+  version = '1.2.1.1';
   icon = 'src/en/questionablequesting/icon.png';
   author = 'personal';
 
@@ -30,6 +30,7 @@ class QuestionableQuesting implements Plugin.PluginBase {
     return title.replace(/^\[(NSFW|Quest|CYOA)\]\s*/i, '').trim();
   }
 
+  // Used only in searchNovels, not popularNovels
   normalizeThreadUrl(href: string): string {
     if (!href) return href;
     let h = href;
@@ -41,20 +42,8 @@ class QuestionableQuesting implements Plugin.PluginBase {
     return h;
   }
 
-  pickThreadRoot(hrefs: (string | undefined)[]): string | undefined {
-    for (const h of hrefs) {
-      if (!h) continue;
-      if (!/\/(unread|latest)(\/|$|\?)/.test(h) && !/\/post-\d+/.test(h)) {
-        return this.normalizeThreadUrl(h);
-      }
-    }
-    if (hrefs[0]) return this.normalizeThreadUrl(hrefs[0]);
-    return undefined;
-  }
-
-  // ===== 1.2.4 ORIGINAL popularNovels BEHAVIOR =====
-  // No page parameter. Always fetches the forum root.
-  // Cover only set when a src exists (no fallback to '').
+  // ===== 1.2.1 ORIGINAL popularNovels =====
+  // No page param. No pagination. Simple .first() href selection.
   async popularNovels(): Promise<Plugin.NovelItem[]> {
     const url = `${SITE}/forums/nsfw-creative-writing.${NSFW_CREATIVE_WRITING_ID}/`;
     const $ = await this.fetchPage(url);
@@ -63,29 +52,18 @@ class QuestionableQuesting implements Plugin.PluginBase {
     $('.structItem--thread').each((_i, el) => {
       if ($(el).find('.structItem-status--sticky').length > 0) return;
 
-      const links = $(el).find('.structItem-title a');
-      const titleText = this.stripTitlePrefix(links.last().text().trim());
-
-      const hrefs: (string | undefined)[] = [];
-      links.each((_j, a) => {
-        hrefs.push($(a).attr('href'));
-      });
-      const href = this.pickThreadRoot(hrefs);
+      const linkEl = $(el).find('.structItem-title a').first();
+      const href = linkEl.attr('href');
       if (!href) return;
 
       const avatarImg = $(el).find('.structItem-cell--icon img').first();
       const src = avatarImg.attr('src') || avatarImg.attr('data-src');
 
-      // Only attach cover when we have a real URL — matches 1.2.4
-      if (src) {
-        novels.push({
-          name: titleText,
-          path: href,
-          cover: this.upgradeAvatar(src),
-        });
-      } else {
-        novels.push({ name: titleText, path: href });
-      }
+      novels.push({
+        name: this.stripTitlePrefix(linkEl.text().trim()),
+        path: href,
+        cover: src ? this.upgradeAvatar(src) : undefined,
+      });
     });
 
     return novels;
@@ -103,18 +81,11 @@ class QuestionableQuesting implements Plugin.PluginBase {
       const avatarImg = $(el).find('.contentRow-figure img').first();
       const src = avatarImg.attr('src') || avatarImg.attr('data-src');
 
-      if (src) {
-        novels.push({
-          name: this.stripTitlePrefix(linkEl.text().trim()),
-          path: this.normalizeThreadUrl(href),
-          cover: this.upgradeAvatar(src),
-        });
-      } else {
-        novels.push({
-          name: this.stripTitlePrefix(linkEl.text().trim()),
-          path: this.normalizeThreadUrl(href),
-        });
-      }
+      novels.push({
+        name: this.stripTitlePrefix(linkEl.text().trim()),
+        path: this.normalizeThreadUrl(href),
+        cover: src ? this.upgradeAvatar(src) : undefined,
+      });
     });
 
     return novels;
