@@ -10,7 +10,7 @@ class QuestionableQuesting implements Plugin.PluginBase {
   id = 'questionablequesting';
   name = 'Questionable Questing';
   site = SITE;
-  version = '1.2.8';
+  version = '1.2.9';
   icon = 'src/en/questionablequesting/icon.png';
   author = 'personal';
 
@@ -322,8 +322,6 @@ class QuestionableQuesting implements Plugin.PluginBase {
       extras.push(...catChapters);
     }
 
-    // QQ serves threadmarks oldest-first (Chapter 1 at top).
-    // Keep that order for main chapters, then append extras in their own order.
     novel.chapters = [...mainChapters, ...extras];
     return novel;
   }
@@ -344,9 +342,61 @@ class QuestionableQuesting implements Plugin.PluginBase {
     let body = post.find('.bbWrapper').first();
     if (body.length === 0) body = $('.bbWrapper').first();
 
-    body.find('.bbCodeBlock-expandLink, .bbCodeBlock-shrinkLink').remove();
-    body.find('.bbCodeSpoiler button').remove();
+    // --- Fix lazy-loaded images (including inside spoilers) ---
+    body.find('img').each((_i, el) => {
+      const $img = $(el);
+      const realSrc =
+        $img.attr('data-src') || $img.attr('data-url') || $img.attr('src');
+      if (realSrc) {
+        const absolute = realSrc.startsWith('http')
+          ? realSrc
+          : realSrc.startsWith('/')
+            ? SITE + realSrc
+            : SITE + '/' + realSrc;
+        $img.attr('src', absolute);
+        $img.removeAttr('data-src');
+        $img.removeAttr('data-url');
+        $img.removeClass('lazyload');
+      }
+    });
 
+    // --- Make spoilers readable ---
+    // Strategy: unwrap spoiler containers so content flows inline.
+    // XenForo spoilers look like:
+    //   <div class="bbCodeSpoiler">
+    //     <button class="bbCodeSpoiler-button">Spoiler: <span>Title</span></button>
+    //     <div class="bbCodeSpoiler-content">
+    //       <div class="bbCodeBlock bbCodeBlock--spoiler">
+    //         <div class="bbCodeBlock-content">...actual content...</div>
+    //       </div>
+    //     </div>
+    //   </div>
+    body.find('.bbCodeSpoiler').each((_i, el) => {
+      const $spoiler = $(el);
+      const $button = $spoiler.find('.bbCodeSpoiler-button').first();
+      const label = $button.text().trim().replace(/^Spoiler:\s*/i, '');
+      const $content = $spoiler.find('.bbCodeSpoiler-content').first();
+
+      if ($content.length === 0) {
+        $spoiler.remove();
+        return;
+      }
+
+      // Build a readable replacement: <p><strong>[Spoiler: Label]</strong></p>
+      // followed by the content directly in the flow.
+      const heading = label
+        ? `<p><strong>[Spoiler: ${label}]</strong></p>`
+        : `<p><strong>[Spoiler]</strong></p>`;
+
+      // Replace the entire spoiler with heading + inner content
+      $spoiler.replaceWith(heading + $content.html());
+    });
+
+    // --- Strip expand/shrink links and stray buttons ---
+    body.find('.bbCodeBlock-expandLink, .bbCodeBlock-shrinkLink').remove();
+    body.find('button').remove();
+
+    // --- Fix any remaining relative image URLs ---
     body.find('img').each((_i, el) => {
       const src = $(el).attr('src');
       if (src && src.startsWith('/')) $(el).attr('src', SITE + src);
