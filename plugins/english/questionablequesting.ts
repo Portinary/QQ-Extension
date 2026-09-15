@@ -10,7 +10,7 @@ class QuestionableQuesting implements Plugin.PluginBase {
   id = 'questionablequesting';
   name = 'Questionable Questing';
   site = SITE;
-  version = '1.3.5.1';
+  version = '1.3.5.2';
   icon = 'src/en/questionablequesting/icon.png';
   author = 'personal';
 
@@ -52,8 +52,9 @@ class QuestionableQuesting implements Plugin.PluginBase {
     return undefined;
   }
 
-  // Page 1 only. No pagination, no page parameter respected.
-  // Always fetches the forum root and returns those ~20 latest threads.
+  // ===== 1.2.0 VERBATIM popularNovels =====
+  // No page parameter. .last() for the link. No stripTitlePrefix.
+  // No pickThreadRoot. No normalizeThreadUrl. Cover only when src exists.
   async popularNovels(): Promise<Plugin.NovelItem[]> {
     const url = `${SITE}/forums/nsfw-creative-writing.${NSFW_CREATIVE_WRITING_ID}/`;
     const $ = await this.fetchPage(url);
@@ -62,21 +63,18 @@ class QuestionableQuesting implements Plugin.PluginBase {
     $('.structItem--thread').each((_i, el) => {
       if ($(el).find('.structItem-status--sticky').length > 0) return;
 
-      const links = $(el).find('.structItem-title a');
-      const titleText = this.stripTitlePrefix(links.last().text().trim());
-
-      const hrefs: (string | undefined)[] = [];
-      links.each((_j, a) => {
-        hrefs.push($(a).attr('href'));
-      });
-      const href = this.pickThreadRoot(hrefs);
+      const linkEl = $(el).find('.structItem-title a').last();
+      const href = linkEl.attr('href');
       if (!href) return;
 
       const avatarImg = $(el).find('.structItem-cell--icon img').first();
       const src = avatarImg.attr('src') || avatarImg.attr('data-src');
-      const cover = src ? this.upgradeAvatar(src) : '';
 
-      novels.push({ name: titleText, path: href, cover });
+      novels.push({
+        name: linkEl.text().trim(),
+        path: href,
+        cover: src ? this.upgradeAvatar(src) : undefined,
+      });
     });
 
     return novels;
