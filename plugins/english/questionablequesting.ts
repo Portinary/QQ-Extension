@@ -10,7 +10,7 @@ class QuestionableQuesting implements Plugin.PluginBase {
   id = 'questionablequesting';
   name = 'Questionable Questing';
   site = SITE;
-  version = '1.2.1.1';
+  version = '1.3.5';
   icon = 'src/en/questionablequesting/icon.png';
   author = 'personal';
 
@@ -30,7 +30,6 @@ class QuestionableQuesting implements Plugin.PluginBase {
     return title.replace(/^\[(NSFW|Quest|CYOA)\]\s*/i, '').trim();
   }
 
-  // Used only in searchNovels, not popularNovels
   normalizeThreadUrl(href: string): string {
     if (!href) return href;
     let h = href;
@@ -42,25 +41,50 @@ class QuestionableQuesting implements Plugin.PluginBase {
     return h;
   }
 
-  // ===== 1.2.1 ORIGINAL popularNovels =====
-  // No page param. No pagination. Simple .first() href selection.
-  async popularNovels(): Promise<Plugin.NovelItem[]> {
-    const url = `${SITE}/forums/nsfw-creative-writing.${NSFW_CREATIVE_WRITING_ID}/`;
+  pickThreadRoot(hrefs: (string | undefined)[]): string | undefined {
+    for (const h of hrefs) {
+      if (!h) continue;
+      if (!/\/(unread|latest)(\/|$|\?)/.test(h) && !/\/post-\d+/.test(h)) {
+        return this.normalizeThreadUrl(h);
+      }
+    }
+    if (hrefs[0]) return this.normalizeThreadUrl(hrefs[0]);
+    return undefined;
+  }
+
+  async popularNovels(page: number = 1): Promise<Plugin.NovelItem[]> {
+    // Coerce whatever the host gives us into a safe integer >= 1.
+    // Handles: undefined, null, 0, NaN, "1", "2", "abc".
+    const rawPage = Number(page);
+    const safePage =
+      Number.isFinite(rawPage) && rawPage > 1 ? Math.floor(rawPage) : 1;
+
+    const baseUrl = `${SITE}/forums/nsfw-creative-writing.${NSFW_CREATIVE_WRITING_ID}`;
+    // Page 1: root with trailing slash (canonical XenForo).
+    // Page N>=2: /page-N with NO trailing slash (confirmed from browser URL).
+    const url = safePage === 1 ? `${baseUrl}/` : `${baseUrl}/page-${safePage}`;
+
     const $ = await this.fetchPage(url);
 
     const novels: Plugin.NovelItem[] = [];
     $('.structItem--thread').each((_i, el) => {
       if ($(el).find('.structItem-status--sticky').length > 0) return;
 
-      const linkEl = $(el).find('.structItem-title a').first();
-      const href = linkEl.attr('href');
+      const links = $(el).find('.structItem-title a');
+      const titleText = this.stripTitlePrefix(links.last().text().trim());
+
+      const hrefs: (string | undefined)[] = [];
+      links.each((_j, a) => {
+        hrefs.push($(a).attr('href'));
+      });
+      const href = this.pickThreadRoot(hrefs);
       if (!href) return;
 
       const avatarImg = $(el).find('.structItem-cell--icon img').first();
       const src = avatarImg.attr('src') || avatarImg.attr('data-src');
 
       novels.push({
-        name: this.stripTitlePrefix(linkEl.text().trim()),
+        name: titleText,
         path: href,
         cover: src ? this.upgradeAvatar(src) : undefined,
       });
@@ -327,6 +351,7 @@ class QuestionableQuesting implements Plugin.PluginBase {
     let body = post.find('.bbWrapper').first();
     if (body.length === 0) body = $('.bbWrapper').first();
 
+    // Fix lazy-loaded images (including inside spoilers)
     body.find('img').each((_i, el) => {
       const $img = $(el);
       const realSrc =
@@ -344,6 +369,7 @@ class QuestionableQuesting implements Plugin.PluginBase {
       }
     });
 
+    // Unwrap spoilers into readable inline content
     body.find('.bbCodeSpoiler').each((_i, el) => {
       const $spoiler = $(el);
       const $button = $spoiler.find('.bbCodeSpoiler-button').first();
