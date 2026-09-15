@@ -10,7 +10,7 @@ class QuestionableQuesting implements Plugin.PluginBase {
   id = 'questionablequesting';
   name = 'Questionable Questing';
   site = SITE;
-  version = '1.3.5.5';
+  version = '1.3.6';
   icon = 'src/en/questionablequesting/icon.png';
   author = 'personal';
 
@@ -150,7 +150,6 @@ class QuestionableQuesting implements Plugin.PluginBase {
 
       const dataTime = timeEl.attr('data-time');
       if (dataTime && /^\d+$/.test(dataTime)) {
-        // LNReader expects ISO strings for releaseTime [citation:1]
         releaseTime = new Date(parseInt(dataTime, 10) * 1000).toISOString();
       } else {
         const dateStr = timeEl.attr('data-date-string');
@@ -207,18 +206,9 @@ class QuestionableQuesting implements Plugin.PluginBase {
     return chapters;
   }
 
-  extractSummary($thread: CheerioAPI): string {
-    const firstPost = $thread('.message:first .bbWrapper').first();
-    if (firstPost.length === 0) return '';
-
-    firstPost
-      .find(
-        '.bbCodeBlock, .bbCodeSpoiler, .bbCodeBlock--quote, button, .bbCodeBlock-expandLink, .bbCodeBlock-shrinkLink',
-      )
-      .remove();
-
-    let html = firstPost.html() || '';
-    html = html
+  // Strip HTML from a fragment, converting block elements to newlines.
+  htmlToText(html: string): string {
+    return html
       .replace(/<\/p>/gi, '\n')
       .replace(/<br\s*\/?>/gi, '\n')
       .replace(/<\/div>/gi, '\n')
@@ -232,8 +222,6 @@ class QuestionableQuesting implements Plugin.PluginBase {
       .replace(/&#39;/g, "'")
       .replace(/\n{3,}/g, '\n\n')
       .trim();
-
-    return html;
   }
 
   async parseNovel(novelPath: string): Promise<Plugin.SourceNovel> {
@@ -260,22 +248,25 @@ class QuestionableQuesting implements Plugin.PluginBase {
 
     const author = $('.username').first().text().trim() || 'Unknown';
 
-    let cover = '';
+    // Summary: author-written thread header description only.
+    // No fallback to OP post or meta description.
     let summary = '';
+    const headerDesc = $(
+      '.threadmarkListingHeader-extraInfo .bbWrapper',
+    ).first();
+    if (headerDesc.length > 0) {
+      const descHtml = headerDesc.html() || '';
+      summary = this.htmlToText(descHtml).slice(0, 500);
+    }
+
+    // Avatar from the main thread page
+    let cover = '';
     const threadMainUrl = `${SITE}/threads/${slug}/`;
     try {
       const $thread = await this.fetchPage(threadMainUrl);
-
       const avatarImg = $thread('img[class^="avatar-u"]').first();
       const src = avatarImg.attr('src') || avatarImg.attr('data-src');
       if (src) cover = this.upgradeAvatar(src);
-
-      summary = this.extractSummary($thread).slice(0, 500);
-
-      if (!summary || summary.length < 50) {
-        summary =
-          $('meta[name="description"]').attr('content')?.trim() || summary;
-      }
     } catch (_e) {
       // Non-fatal
     }
@@ -336,10 +327,10 @@ class QuestionableQuesting implements Plugin.PluginBase {
     let body = post.find('.bbWrapper').first();
     if (body.length === 0) body = $('.bbWrapper').first();
 
-    // 1. Remove scripts and embeds that could auto-play
+    // Remove scripts and embeds that could auto-play
     body.find('script, noscript, iframe, video, audio, embed, object').remove();
 
-    // 2. Fix lazy-loaded images (including inside spoilers)
+    // Fix lazy-loaded images (including inside spoilers)
     body.find('img').each((_i, el) => {
       const $img = $(el);
       const realSrc =
@@ -357,7 +348,7 @@ class QuestionableQuesting implements Plugin.PluginBase {
       }
     });
 
-    // 3. Unwrap spoilers into readable inline content
+    // Unwrap spoilers into readable inline content
     body.find('.bbCodeSpoiler').each((_i, el) => {
       const $spoiler = $(el);
       const $button = $spoiler.find('.bbCodeSpoiler-button').first();
@@ -369,8 +360,9 @@ class QuestionableQuesting implements Plugin.PluginBase {
         return;
       }
 
-      // Remove any videos/iframes that were inside the spoiler
-      $content.find('script, noscript, iframe, video, audio, embed, object').remove();
+      $content
+        .find('script, noscript, iframe, video, audio, embed, object')
+        .remove();
 
       const heading = label
         ? `<p><strong>[Spoiler: ${label}]</strong></p>`
@@ -379,11 +371,9 @@ class QuestionableQuesting implements Plugin.PluginBase {
       $spoiler.replaceWith(heading + $content.html());
     });
 
-    // 4. Strip remaining expand/shrink links and buttons
     body.find('.bbCodeBlock-expandLink, .bbCodeBlock-shrinkLink').remove();
     body.find('button').remove();
 
-    // 5. Final pass for relative image URLs
     body.find('img').each((_i, el) => {
       const src = $(el).attr('src');
       if (src && src.startsWith('/')) $(el).attr('src', SITE + src);
