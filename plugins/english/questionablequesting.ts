@@ -10,13 +10,28 @@ class QuestionableQuesting implements Plugin.PluginBase {
   id = 'questionablequesting';
   name = 'Questionable Questing';
   site = SITE;
-  version = '1.3.6';
+  version = '1.3.7';
   icon = 'src/en/questionablequesting/icon.png';
   author = 'personal';
 
   async fetchPage(url: string): Promise<CheerioAPI> {
     const response = await fetchApi(url);
     const body = await response.text();
+
+    // Detect Cloudflare challenge and signal the host app
+    if (
+      response.status === 403 ||
+      body.includes('cf-browser-verification') ||
+      body.includes('Checking your browser') ||
+      body.includes('cf_chl_opt') ||
+      body.includes('Just a moment...') ||
+      body.includes('Enable JavaScript and cookies to continue')
+    ) {
+      const error = new Error('Cloudflare challenge required');
+      error.name = 'CloudflareError';
+      throw error;
+    }
+
     return cheerioLoad(body);
   }
 
