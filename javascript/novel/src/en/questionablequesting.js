@@ -6,7 +6,7 @@ const mangayomiSources = [{
   "iconUrl": "https://forum.questionablequesting.com/favicon.ico",
   "typeSource": "single",
   "itemType": 2,
-  "version": "1.3.8",
+  "version": "1.3.9",
   "pkgPath": "",
   "notes": ""
 }];
@@ -19,7 +19,8 @@ class DefaultExtension extends MProvider {
   getHeaders(url) {
     return {
       'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
-      'Referer': SITE
+      'Referer': SITE,
+      'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8'
     };
   }
 
@@ -158,7 +159,7 @@ class DefaultExtension extends MProvider {
       }
 
       chapters.push({
-        'name': prefix ? `[${prefix}] ${rawName}` : rawName,
+        'name': rawName,
         'url': href,
         'scanlator': prefix || "Main",
         ...(dateUpload && { dateUpload })
@@ -254,16 +255,16 @@ class DefaultExtension extends MProvider {
     }
 
     if (categories.length === 0) {
-      categories.push({ label: 'Threadmarks', url: defaultUrl, isMain: true });
+      categories.push({ label: 'Main', url: defaultUrl, isMain: true });
     }
 
     const mainCat = categories.find(c => c.isMain) || categories[0];
-    const mainChapters = await this.fetchCategory(mainCat.url, '');
+    const mainChapters = await this.fetchCategory(mainCat.url, 'Main');
 
     const extraChapters = [];
     for (const cat of categories) {
       if (cat.isMain) continue;
-      const catChapters = await this.fetchCategory(cat.url, cat.label);
+      const catChapters = await this.fetchCategory(cat.url, cat.label || 'Extras');
       extraChapters.push(...catChapters);
     }
 
@@ -341,7 +342,10 @@ class DefaultExtension extends MProvider {
 
     let processed = html;
 
-    // Convert XenForo attachment containers and inline images into clean standalone HTML tags
+    // Remove XenForo Lightbox anchor wrappers that intercept image clicks
+    processed = processed.replace(/<a\b[^>]*class=["'][^"']*lbContainer[^"']*["'][^>]*>(.*?)<\/a>/gi, '$1');
+
+    // Convert images directly to native single img tags inside clear paragraph breaks
     processed = processed.replace(/<img([^>]*?)>/gi, (match, attrs) => {
       const dataUrlMatch = attrs.match(/data-url=["']([^"']+)["']/i);
       const dataSrcMatch = attrs.match(/data-src=["']([^"']+)["']/i);
@@ -352,7 +356,7 @@ class DefaultExtension extends MProvider {
       else if (dataSrcMatch && !dataSrcMatch[1].startsWith('data:')) realSrc = dataSrcMatch[1];
       else if (srcMatch && !srcMatch[1].startsWith('data:')) realSrc = srcMatch[1];
 
-      if (!realSrc) return match;
+      if (!realSrc) return '';
 
       let absolute = realSrc.trim();
       if (!absolute.startsWith('http://') && !absolute.startsWith('https://')) {
@@ -360,8 +364,7 @@ class DefaultExtension extends MProvider {
         absolute = SITE + absolute;
       }
 
-      // Format directly as standard HTML paragraph image
-      return `</p><p><img src="${absolute}" alt="image" /></p><p>`;
+      return `<br/><img src="${absolute}" /><br/>`;
     });
 
     return processed;
