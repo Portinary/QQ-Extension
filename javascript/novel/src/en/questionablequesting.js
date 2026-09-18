@@ -6,7 +6,7 @@ const mangayomiSources = [{
   "iconUrl": "https://forum.questionablequesting.com/favicon.ico",
   "typeSource": "single",
   "itemType": 2,
-  "version": "1.3.1",
+  "version": "1.3.2",
   "pkgPath": "",
   "notes": ""
 }];
@@ -152,7 +152,8 @@ class DefaultExtension extends MProvider {
       const rawHref = linkEl.attr('href');
       if (!rawHref) continue;
 
-      const href = this.normalizeChapterUrl(rawHref);
+      // DO NOT strip fragments or query parameters; pass full raw link
+      const href = rawHref.startsWith('http') ? rawHref : SITE + (rawHref.startsWith('/') ? rawHref : '/' + rawHref);
       const rawName = linkEl.text.trim();
       if (!rawName) continue;
 
@@ -174,7 +175,7 @@ class DefaultExtension extends MProvider {
 
     return chapters;
   }
-
+  
   countChaptersAndPages(doc) {
     let count = 0;
     const statsList = doc.select('.threadmarkListingHeader-stats dl.pairs');
@@ -288,13 +289,11 @@ class DefaultExtension extends MProvider {
   }
 
   async getHtmlContent(name, url) {
-    const absoluteUrl = this.normalizeChapterUrl(url);
     const client = new Client();
+    let currentUrl = url.startsWith('http') ? url : SITE + (url.startsWith('/') ? url : '/' + url);
 
-    let currentUrl = absoluteUrl;
+    // Fetch page & follow up to 3 redirects
     let res = await client.get(currentUrl, this.getHeaders(currentUrl));
-
-    // Follow redirect chain up to 3 times
     let redirectCount = 0;
     while ((res.statusCode >= 300 && res.statusCode < 400) && redirectCount < 3) {
       const location = res.headers && (res.headers['location'] || res.headers['Location']);
@@ -306,13 +305,13 @@ class DefaultExtension extends MProvider {
 
     const doc = new Document(res.body);
 
-    // Parse target Post ID from absolute URL or redirect response URL
-    let postId = null;
-    const postMatch = absoluteUrl.match(/(?:post-|\/posts\/|#post-)(\d+)/) || currentUrl.match(/(?:post-|\/posts\/|#post-)(\d+)/);
-    if (postMatch) postId = postMatch[1];
+    // Extract post ID from original URL or redirected location
+    const postMatch = url.match(/(?:post-|\/posts\/|#post-)(\d+)/) || currentUrl.match(/(?:post-|\/posts\/|#post-)(\d+)/);
+    const postId = postMatch ? postMatch[1] : null;
 
     let body = null;
 
+    // Direct match by post ID
     if (postId) {
       const targetArticle = 
         doc.selectFirst(`#post-${postId}`) || 
@@ -325,8 +324,11 @@ class DefaultExtension extends MProvider {
       }
     }
 
+    // Threadmark single post landing fallback
+    if (!body) body = doc.selectFirst('.article-single .bbWrapper');
+    if (!body) body = doc.selectFirst('.message-threadmark .bbWrapper');
     if (!body) body = doc.selectFirst('.message--post .bbWrapper');
-    if (!body) body = doc.selectFirst('.message-body .bbWrapper');
+    if (!body) body = doc.selectFirst('.message-body');
     if (!body) body = doc.selectFirst('.bbWrapper');
 
     if (!body) {
