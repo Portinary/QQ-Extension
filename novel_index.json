@@ -1,7 +1,6 @@
 [
   {
     "name": "Questionable Questing",
-    "id": 151641039,
     "baseUrl": "https://forum.questionablequesting.com",
     "lang": "en",
     "typeSource": "single",
@@ -11,7 +10,7 @@
     "isNsfw": true,
     "isManga": false,
     "hasCloudflare": true,
-    "version": "1.0.0",
+    "version": "1.0.1",
     "sourceCodeUrl": "https://raw.githubusercontent.com/Portinary/QQ-Extension/mangayomi/javascript/novel/src/en/questionablequesting.js",
     "apiUrl": ""
   }
