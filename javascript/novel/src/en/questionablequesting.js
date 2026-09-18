@@ -6,7 +6,7 @@ const mangayomiSources = [{
   "iconUrl": "https://forum.questionablequesting.com/favicon.ico",
   "typeSource": "single",
   "itemType": 2,
-  "version": "1.2.0",
+  "version": "1.2.1",
   "pkgPath": "",
   "notes": ""
 }];
@@ -112,17 +112,39 @@ class DefaultExtension extends MProvider {
   async search(query, page, filters) {
     const term = query.trim();
 
-    // keywords= is the legacy XenForo parameter that returns results.
-    // Node constraints narrow to NSFW Creative Writing forum.
-    // Title-only filter removed for testing.
-    const searchUrl =
+    // Direct port of LNReader searchNovels logic:
+    // title-only search using keywords= and c[title_only]=1.
+    const titleUrl =
       `${SITE}/search/search?keywords=${encodeURIComponent(term)}` +
-      `&t=post&c[child_nodes]=1` +
-      `&c[nodes][0]=${NSFW_CREATIVE_WRITING_ID}` +
-      `&o=date&page=${page}`;
+      `&t=thread&c[title_only]=1&page=${page}`;
+    const titleResults = await this.runSearch(titleUrl);
 
-    const results = await this.runSearch(searchUrl);
-    return { list: results, hasNextPage: results.length >= 20 };
+    const isSingleWord = !term.includes(' ') && term.length > 0;
+    if (!isSingleWord || page !== 1) {
+      return { list: titleResults, hasNextPage: titleResults.length >= 20 };
+    }
+
+    // For single-word queries, also try author search on page 1.
+    const authorUrl =
+      `${SITE}/search/search?users=${encodeURIComponent(term)}` +
+      `&user_content=thread`;
+    let authorResults = [];
+    try {
+      authorResults = await this.runSearch(authorUrl);
+    } catch (_e) {
+      authorResults = [];
+    }
+
+    const seen = new Set();
+    const merged = [];
+
+    for (const n of [...titleResults, ...authorResults]) {
+      if (!n.link || seen.has(n.link)) continue;
+      seen.add(n.link);
+      merged.push(n);
+    }
+
+    return { list: merged, hasNextPage: merged.length >= 20 };
   }
 
   extractChapters(doc, prefix) {
