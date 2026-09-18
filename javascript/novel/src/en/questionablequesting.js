@@ -6,7 +6,7 @@ const mangayomiSources = [{
   "iconUrl": "https://forum.questionablequesting.com/favicon.ico",
   "typeSource": "single",
   "itemType": 2,
-  "version": "1.3.5",
+  "version": "1.3.6",
   "pkgPath": "",
   "notes": ""
 }];
@@ -29,13 +29,13 @@ class DefaultExtension extends MProvider {
     return upgraded.startsWith('http') ? upgraded : SITE + upgraded;
   }
 
-  // Improved title cleaner to handle bolded search highlight tags
+  // Robust title cleaner matching Popular and Search views
   stripTitlePrefix(title) {
     if (!title) return '';
     return title
-      .replace(/<[^>]+>/g, '') // Strip inline HTML highlighting tags first
+      .replace(/<[^>]+>/g, '') // Strip inline HTML highlighting tags
       .replace(/^(?:\[\s*(?:NSFW\vert{}Quest\vert{}CYOA\vert{}SFW\vert{}Original\vert{}Fanfiction)\s*\]|\b(?:NSFW|Quest|CYOA|SFW)\b)\s*/i, '')
-      .replace(/^\[[^\]]+\]\s*/, '') // Catch any other [Prefix] tags
+      .replace(/^\[[^\]]+\]\s*/, '')
       .trim();
   }
 
@@ -103,7 +103,7 @@ class DefaultExtension extends MProvider {
       if (!href) continue;
 
       novels.push({
-        'name': this.stripTitlePrefix(linkEl.outerHtml || linkEl.text || ''),
+        'name': this.stripTitlePrefix(linkEl.text || linkEl.outerHtml || ''),
         'link': this.normalizeThreadUrl(href),
         'imageUrl': (el.selectFirst('.contentRow-figure img') ? this.upgradeAvatar(el.selectFirst('.contentRow-figure img').attr('src') || el.selectFirst('.contentRow-figure img').attr('data-src')) : ''),
       });
@@ -258,12 +258,18 @@ class DefaultExtension extends MProvider {
       categories.push({ label: 'Threadmarks', url: defaultUrl, isMain: true });
     }
 
-    const allChapters = [];
+    const mainCat = categories.find(c => c.isMain) || categories[0];
+    const mainChapters = await this.fetchCategory(mainCat.url, '');
+
+    const extraChapters = [];
     for (const cat of categories) {
-      const label = cat.isMain ? '' : cat.label;
-      const catChapters = await this.fetchCategory(cat.url, label);
-      allChapters.push(...catChapters.reverse());
+      if (cat.isMain) continue;
+      const catChapters = await this.fetchCategory(cat.url, cat.label);
+      extraChapters.push(...catChapters);
     }
+
+    // Place Main chapters in reverse chronological order first, then append Extras at the bottom
+    const sortedChapters = [...mainChapters.reverse(), ...extraChapters.reverse()];
 
     return {
       'name': title,
@@ -272,7 +278,7 @@ class DefaultExtension extends MProvider {
       'description': description,
       'author': author,
       'status': 0,
-      'chapters': allChapters,
+      'chapters': sortedChapters,
     };
   }
 
@@ -335,17 +341,8 @@ class DefaultExtension extends MProvider {
   fixImages(html) {
     if (!html) return "";
 
-    // 1. Convert XenForo attachment image containers (<a class="lbContainer-zoomer"> or data-url wrappers) into standard <img> tags
-    let processed = html.replace(/<a\b[^>]*\bhref=["']([^"']+)["'][^>]*>(?:\s*<img\b[^>]*>)?\s*<\/a>/gi, (match, href) => {
-      if (href.includes('/attachments/') || href.match(/\.(jpg|jpeg|png|gif|webp)(\?.*)?$/i)) {
-        const absolute = href.startsWith('http') ? href : SITE + (href.startsWith('/') ? href : '/' + href);
-        return `<p><img src="${absolute}" style="max-width:100%; height:auto;" /></p>`;
-      }
-      return match;
-    });
-
-    // 2. Parse existing <img> tags and resolve data-url, data-src, or relative paths
-    processed = processed.replace(/<img([^>]*?)>/gi, (match, attrs) => {
+    // Step 1: Fix standard XenForo img tags (data-url / data-src / src)
+    let processed = html.replace(/<img([^>]*?)>/gi, (match, attrs) => {
       const dataUrlMatch = attrs.match(/data-url=["']([^"']+)["']/i);
       const dataSrcMatch = attrs.match(/data-src=["']([^"']+)["']/i);
       const srcMatch = attrs.match(/\bsrc=["']([^"']+)["']/i);
@@ -366,9 +363,18 @@ class DefaultExtension extends MProvider {
       return `<img src="${absolute}" style="max-width:100%; height:auto;" />`;
     });
 
-    // 3. Convert plaintext image URLs (ending in .png, .jpg, .jpeg, .gif, .webp) into rendered <img> elements
-    processed = processed.replace(/(https?:\/\/[^\s<"']+\.(?:png|jpg|jpeg|gif|webp)(?:\?[^\s<"']*)?)/gi, (match, url) => {
-      return `<p><img src="${url}" style="max-width:100%; height:auto;" /></p>`;
+    // Step 2: Convert lightbox attachment anchors to img tags safely
+    processed = processed.replace(/<a\b[^>]*\bhref=["']([^"']+)["'][^>]*>(?:\s*<img\b[^>]*>)?\s*<\/a>/gi, (match, href) => {
+      if (href.includes('/attachments/') || href.match(/\.(jpg|jpeg|png|gif|webp)(\?.*)?$/i)) {
+        const absolute = href.startsWith('http') ? href : SITE + (href.startsWith('/') ? href : '/' + href);
+        return `<p><img src="${absolute}" style="max-width:100%; height:auto;" /></p>`;
+      }
+      return match;
+    });
+
+    // Step 3: Replace standalone raw image URLs outside existing HTML tags
+    processed = processed.replace(/(>|^)(https?:\/\/[^\s<"']+\.(?:png|jpg|jpeg|gif|webp)(?:\?[^\s<"']*)?)(?=<|$)/gi, (match, prefix, url) => {
+      return `${prefix}<p><img src="${url}" style="max-width:100%; height:auto;" /></p>`;
     });
 
     return processed;
