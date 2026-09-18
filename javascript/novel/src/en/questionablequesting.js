@@ -6,7 +6,7 @@ const mangayomiSources = [{
   "iconUrl": "https://forum.questionablequesting.com/favicon.ico",
   "typeSource": "single",
   "itemType": 2,
-  "version": "1.2.9.5",
+  "version": "1.2.9.6",
   "pkgPath": "",
   "notes": ""
 }];
@@ -48,19 +48,17 @@ class DefaultExtension extends MProvider {
   }
 
   normalizeChapterUrl(href) {
-    if (!href) return '';
-  
-    let cleanHref = href.trim();
-    const postMatch = cleanHref.match(/(?:post-|\/posts\/)(\d+)/);
+    if (!href) return href;
+
+    const postMatch = href.match(/(?:post-|\/posts\/)(\d+)/);
     if (postMatch) {
       return `${SITE}/posts/${postMatch[1]}/`;
     }
 
-    if (!cleanHref.startsWith('http://') && !cleanHref.startsWith('https://')) {
-      if (!cleanHref.startsWith('/')) cleanHref = '/' + cleanHref;
-      return SITE + cleanHref;
+    if (!href.startsWith('http')) {
+      return SITE + (href.startsWith('/') ? href : '/' + href);
     }
-    return cleanHref;
+    return href;
   }
   
   async getPopular(page) {
@@ -372,19 +370,20 @@ class DefaultExtension extends MProvider {
   }
 
   async getPageList(url) {
-    // Ensure absolute URL before sending to Mangayomi's client
+    // Mangayomi requires getPageList to return an array containing the target chapter URL
     const absoluteUrl = this.normalizeChapterUrl(url);
     return [{ url: absoluteUrl }];
   }
 
-  async getHtmlContent(url) {
+  async getHtmlContent(name, url) {
     const absoluteUrl = this.normalizeChapterUrl(url);
     const client = new Client();
     
-    // 1. Fetch URL with redirect support
+    // 1. Fetch post page
     let res = await client.get(absoluteUrl, this.getHeaders(absoluteUrl));
     let finalUrl = absoluteUrl;
 
+    // Follow redirects for threadmarks landing on full thread paths
     if (res.statusCode === 301 || res.statusCode === 302 || res.statusCode === 303) {
       const location = res.headers && (res.headers['location'] || res.headers['Location']);
       if (location) {
@@ -395,45 +394,26 @@ class DefaultExtension extends MProvider {
 
     const doc = new Document(res.body);
 
-    // 2. Extract post ID from original or redirected URL
-    let postId = null;
-    const postMatch = absoluteUrl.match(/\/posts\/(\d+)/) || finalUrl.match(/#post-(\d+)/) || finalUrl.match(/\/posts\/(\d+)/);
-    if (postMatch) {
-      postId = postMatch[1];
-    }
+    // 2. Select XenForo post container
+    let post = doc.selectFirst('.message-body');
+    if (!post) post = doc.selectFirst('.message-content');
+    if (!post) post = doc.selectFirst('article.message');
 
-    let body = null;
-
-    // 3. Try finding specific post container first
-    if (postId) {
-      const targetPost = doc.selectFirst(`#post-${postId}, article[data-content="post-${postId}"], .message[data-content="post-${postId}"]`);
-      if (targetPost) {
-        body = targetPost.selectFirst('.message-body .bbWrapper') || 
-               targetPost.selectFirst('.message-body') || 
-               targetPost.selectFirst('.message-content');
-      }
-    }
-
-    // 4. Fallback across general XenForo post selectors
-    if (!body) body = doc.selectFirst('.message-body .bbWrapper');
-    if (!body) body = doc.selectFirst('.message-body');
-    if (!body) body = doc.selectFirst('.message-content .bbWrapper');
-    if (!body) body = doc.selectFirst('.message-content');
+    let body = post ? post.selectFirst('.bbWrapper') : null;
     if (!body) body = doc.selectFirst('.bbWrapper');
-    if (!body) body = doc.selectFirst('article.message-body');
 
-    // 5. Emergency fallback: collect all standalone images or paragraphs if post container parsing fails
+    // Emergency fallback for image-only posts outside standard wrappers
     if (!body) {
       const imgElements = doc.select('.message-inner img, article img, .bbImageContainer img');
       if (imgElements && imgElements.length > 0) {
-        let imgsHtml = imgElements.map(img => img.outerHtml).join('<br/>');
+        const imgsHtml = imgElements.map(img => img.outerHtml).join('<br/>');
         const cleanedHtml = await this.cleanHtmlContent(imgsHtml);
         return `<html><body>${cleanedHtml}</body></html>`;
       }
     }
 
     if (!body) {
-      return '<html><body><p>Chapter content not found (Page access blocked or post structure altered).</p></body></html>';
+      return '<html><body><p>Chapter content not found.</p></body></html>';
     }
 
     const cleanedHtml = await this.cleanHtmlContent(body.outerHtml || '');
