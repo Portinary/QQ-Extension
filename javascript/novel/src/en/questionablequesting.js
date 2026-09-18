@@ -6,7 +6,7 @@ const mangayomiSources = [{
   "iconUrl": "https://forum.questionablequesting.com/favicon.ico",
   "typeSource": "single",
   "itemType": 2,
-  "version": "1.2.4",
+  "version": "1.2.5",
   "pkgPath": "",
   "notes": ""
 }];
@@ -45,7 +45,6 @@ class DefaultExtension extends MProvider {
 
   extractPostId(url) {
     if (!url) return null;
-    // Matches both #post-12345 and /post-12345
     const match = url.match(/(?:#|\/)post-(\d+)/);
     return match ? match[1] : null;
   }
@@ -369,12 +368,8 @@ class DefaultExtension extends MProvider {
   async getHtmlContent(name, url) {
     const client = new Client();
 
-    // Extract the post ID from the chapter URL. Threadmark links often have
-    // the format /threads/slug.12345/page-84#post-12823334 or /post-12345.
     const postId = this.extractPostId(url);
 
-    // Prefer the single-post URL, which returns only one post's HTML.
-    // This is much cleaner than fetching an entire thread page.
     let fetchUrl = url;
     if (postId) {
       fetchUrl = `${SITE}/posts/${postId}/`;
@@ -396,9 +391,11 @@ class DefaultExtension extends MProvider {
       return '<html><body><p>Chapter content not found.</p></body></html>';
     }
 
-    const cleanedHtml = this.cleanHtmlContent(body.outerHtml || '');
+    // IMPORTANT: await the async cleanHtmlContent call.
+    // Without await, this returns a Promise, which gets stringified
+    // into the reader as [object Promise].
+    const cleanedHtml = await this.cleanHtmlContent(body.outerHtml || '');
 
-    // Wrap in a minimal HTML document so the reader can parse it.
     return `<html><body>${cleanedHtml}</body></html>`;
   }
 
