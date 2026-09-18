@@ -6,7 +6,7 @@ const mangayomiSources = [{
   "iconUrl": "https://forum.questionablequesting.com/favicon.ico",
   "typeSource": "single",
   "itemType": 2,
-  "version": "1.1.5",
+  "version": "1.1.6",
   "pkgPath": "",
   "notes": ""
 }];
@@ -111,51 +111,15 @@ class DefaultExtension extends MProvider {
 
   async search(query, page, filters) {
     const term = query.trim();
-    // XenForo title-only search. Uses keywords= for compatibility with
-    // Mangayomi's Client, plus c[title_only]=1 and o=date sorting.
-    const titleUrl =
-      `${SITE}/search/search?keywords=${encodeURIComponent(term)}` +
+
+    // XenForo 2.2+ uses q= for search term.
+    // c[title_only]=1 restricts to titles. o=date sorts by date.
+    const searchUrl =
+      `${SITE}/search/search?q=${encodeURIComponent(term)}` +
       `&c[title_only]=1&o=date&page=${page}`;
-    const titleResults = await this.runSearch(titleUrl);
 
-    if (titleResults.length === 0) {
-      // Fallback: search without title_only to confirm endpoint reachability
-      const fallbackUrl =
-        `${SITE}/search/search?keywords=${encodeURIComponent(term)}` +
-        `&o=date&page=${page}`;
-      try {
-        const fallbackResults = await this.runSearch(fallbackUrl);
-        return { list: fallbackResults, hasNextPage: fallbackResults.length >= 20 };
-      } catch (_e) {
-        return { list: [], hasNextPage: false };
-      }
-    }
-
-    const isSingleWord = !term.includes(' ') && term.length > 0;
-    if (!isSingleWord || page !== 1) {
-      return { list: titleResults, hasNextPage: titleResults.length >= 20 };
-    }
-
-    const authorUrl =
-      `${SITE}/search/search?users=${encodeURIComponent(term)}` +
-      `&user_content=thread`;
-    let authorResults = [];
-    try {
-      authorResults = await this.runSearch(authorUrl);
-    } catch (_e) {
-      authorResults = [];
-    }
-
-    const seen = new Set();
-    const merged = [];
-
-    for (const n of [...titleResults, ...authorResults]) {
-      if (!n.link || seen.has(n.link)) continue;
-      seen.add(n.link);
-      merged.push(n);
-    }
-
-    return { list: merged, hasNextPage: merged.length >= 20 };
+    const results = await this.runSearch(searchUrl);
+    return { list: results, hasNextPage: results.length >= 20 };
   }
 
   extractChapters(doc, prefix) {
@@ -280,7 +244,6 @@ class DefaultExtension extends MProvider {
       titleHtml = titleHtml.replace(/<span class="label-append[^>]*>.*?<\/span>/gi, '');
 
       const tempDoc = new Document(titleHtml);
-      // Defensive trim: protects against null text from empty fragments
       rawTitle = (tempDoc.text || '').trim() || (titleEl.text || '').trim();
     }
     if (!rawTitle || rawTitle === 'Untitled') {
