@@ -6,7 +6,7 @@ const mangayomiSources = [{
   "iconUrl": "https://forum.questionablequesting.com/favicon.ico",
   "typeSource": "single",
   "itemType": 2,
-  "version": "1.3.4",
+  "version": "1.3.5",
   "pkgPath": "",
   "notes": ""
 }];
@@ -29,10 +29,13 @@ class DefaultExtension extends MProvider {
     return upgraded.startsWith('http') ? upgraded : SITE + upgraded;
   }
 
+  // Improved title cleaner to handle bolded search highlight tags
   stripTitlePrefix(title) {
     if (!title) return '';
     return title
-      .replace(/^(?:\[\s*(?:NSFW\vert{}Quest\vert{}CYOA\vert{}SFW)\s*\]|\b(?:NSFW|Quest|CYOA|SFW)\b)\s*/i, '')
+      .replace(/<[^>]+>/g, '') // Strip inline HTML highlighting tags first
+      .replace(/^(?:\[\s*(?:NSFW\vert{}Quest\vert{}CYOA\vert{}SFW\vert{}Original\vert{}Fanfiction)\s*\]|\b(?:NSFW|Quest|CYOA|SFW)\b)\s*/i, '')
+      .replace(/^\[[^\]]+\]\s*/, '') // Catch any other [Prefix] tags
       .trim();
   }
 
@@ -69,7 +72,7 @@ class DefaultExtension extends MProvider {
       if (!rawHref) continue;
 
       novels.push({
-        'name': this.stripTitlePrefix(linkEl.text.trim()),
+        'name': this.stripTitlePrefix(linkEl.text || linkEl.outerHtml || ''),
         'link': this.normalizeThreadUrl(rawHref),
         'imageUrl': (el.selectFirst('.structItem-cell--icon img') ? this.upgradeAvatar(el.selectFirst('.structItem-cell--icon img').attr('src') || el.selectFirst('.structItem-cell--icon img').attr('data-src')) : ''),
       });
@@ -100,7 +103,7 @@ class DefaultExtension extends MProvider {
       if (!href) continue;
 
       novels.push({
-        'name': this.stripTitlePrefix(linkEl.text.trim()),
+        'name': this.stripTitlePrefix(linkEl.outerHtml || linkEl.text || ''),
         'link': this.normalizeThreadUrl(href),
         'imageUrl': (el.selectFirst('.contentRow-figure img') ? this.upgradeAvatar(el.selectFirst('.contentRow-figure img').attr('src') || el.selectFirst('.contentRow-figure img').attr('data-src')) : ''),
       });
@@ -289,15 +292,12 @@ class DefaultExtension extends MProvider {
     }
 
     const doc = new Document(res.body);
-
-    // Extract exact post ID from permalink or redirected URL
     const postMatch = url.match(/post-(\d+)/) || targetUrl.match(/post-(\d+)/);
     const postId = postMatch ? postMatch[1] : null;
 
     let body = null;
 
     if (postId) {
-      // Direct lookup for targeted threadmark post
       const targetArticle = 
         doc.selectFirst(`article#js-post-${postId}`) || 
         doc.selectFirst(`article#post-${postId}`) || 
@@ -309,7 +309,6 @@ class DefaultExtension extends MProvider {
       }
     }
 
-    // Secondary selector: Search for the main threadmark body container
     if (!body) body = doc.selectFirst('.message-inner .bbWrapper');
     if (!body) body = doc.selectFirst('article.message-body .bbWrapper');
     if (!body) body = doc.selectFirst('.bbWrapper');
@@ -334,12 +333,26 @@ class DefaultExtension extends MProvider {
   }
 
   fixImages(html) {
-    return html.replace(/<img([^>]*?)>/gi, (match, attrs) => {
+    if (!html) return "";
+
+    // 1. Convert XenForo attachment image containers (<a class="lbContainer-zoomer"> or data-url wrappers) into standard <img> tags
+    let processed = html.replace(/<a\b[^>]*\bhref=["']([^"']+)["'][^>]*>(?:\s*<img\b[^>]*>)?\s*<\/a>/gi, (match, href) => {
+      if (href.includes('/attachments/') || href.match(/\.(jpg|jpeg|png|gif|webp)(\?.*)?$/i)) {
+        const absolute = href.startsWith('http') ? href : SITE + (href.startsWith('/') ? href : '/' + href);
+        return `<p><img src="${absolute}" style="max-width:100%; height:auto;" /></p>`;
+      }
+      return match;
+    });
+
+    // 2. Parse existing <img> tags and resolve data-url, data-src, or relative paths
+    processed = processed.replace(/<img([^>]*?)>/gi, (match, attrs) => {
+      const dataUrlMatch = attrs.match(/data-url=["']([^"']+)["']/i);
       const dataSrcMatch = attrs.match(/data-src=["']([^"']+)["']/i);
       const srcMatch = attrs.match(/\bsrc=["']([^"']+)["']/i);
 
       let realSrc = '';
-      if (dataSrcMatch && !dataSrcMatch[1].startsWith('data:')) realSrc = dataSrcMatch[1];
+      if (dataUrlMatch && !dataUrlMatch[1].startsWith('data:')) realSrc = dataUrlMatch[1];
+      else if (dataSrcMatch && !dataSrcMatch[1].startsWith('data:')) realSrc = dataSrcMatch[1];
       else if (srcMatch && !srcMatch[1].startsWith('data:')) realSrc = srcMatch[1];
 
       if (!realSrc) return match;
@@ -352,6 +365,13 @@ class DefaultExtension extends MProvider {
 
       return `<img src="${absolute}" style="max-width:100%; height:auto;" />`;
     });
+
+    // 3. Convert plaintext image URLs (ending in .png, .jpg, .jpeg, .gif, .webp) into rendered <img> elements
+    processed = processed.replace(/(https?:\/\/[^\s<"']+\.(?:png|jpg|jpeg|gif|webp)(?:\?[^\s<"']*)?)/gi, (match, url) => {
+      return `<p><img src="${url}" style="max-width:100%; height:auto;" /></p>`;
+    });
+
+    return processed;
   }
 
   get supportsLatest() {
