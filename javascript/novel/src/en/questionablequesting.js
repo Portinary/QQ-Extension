@@ -6,7 +6,7 @@ const mangayomiSources = [{
   "iconUrl": "https://forum.questionablequesting.com/favicon.ico",
   "typeSource": "single",
   "itemType": 2,
-  "version": "1.2.9.2",
+  "version": "1.2.9.3",
   "pkgPath": "",
   "notes": ""
 }];
@@ -380,22 +380,41 @@ class DefaultExtension extends MProvider {
   async getHtmlContent(url) {
     const absoluteUrl = this.normalizeChapterUrl(url);
     const client = new Client();
-    const res = await client.get(absoluteUrl, this.getHeaders(absoluteUrl));
-    const doc = new Document(res.body);
+    
+    // 1. Fetch initial URL and handle XenForo redirects
+    let res = await client.get(absoluteUrl, this.getHeaders(absoluteUrl));
+    let finalUrl = absoluteUrl;
 
-    let body = null;
-
-    // 1. If the URL points directly to a specific post ID (e.g., /posts/12345/)
-    const postMatch = absoluteUrl.match(/\/posts\/(\d+)/);
-    if (postMatch) {
-      const postId = postMatch[1];
-      const targetPost = doc.selectFirst(`#post-${postId}, article[data-content="post-${postId}"]`);
-      if (targetPost) {
-        body = targetPost.selectFirst('.message-body, .bbWrapper');
+    if (res.statusCode === 301 || res.statusCode === 302 || res.statusCode === 303) {
+      const location = res.headers && (res.headers['location'] || res.headers['Location']);
+      if (location) {
+        finalUrl = location.startsWith('http') ? location : SITE + location;
+        res = await client.get(finalUrl, this.getHeaders(finalUrl));
       }
     }
 
-    // 2. Fallbacks for standard post containers on thread/post pages
+    const doc = new Document(res.body);
+    let body = null;
+
+    // 2. Extract post ID from original URL or redirected fragment/path
+    let postId = null;
+    const postMatch = absoluteUrl.match(/\/posts\/(\d+)/) || finalUrl.match(/#post-(\d+)/) || finalUrl.match(/\/posts\/(\d+)/);
+    if (postMatch) {
+      postId = postMatch[1];
+    }
+
+    // 3. Target specific post if ID is present
+    if (postId) {
+      const targetPost = doc.selectFirst(`#post-${postId}, article[data-content="post-${postId}"], [data-author][id*="${postId}"]`);
+      if (targetPost) {
+        body = targetPost.selectFirst('.message-body .bbWrapper') || 
+               targetPost.selectFirst('.message-body') || 
+               targetPost.selectFirst('.bbWrapper');
+      }
+    }
+
+    // 4. General fallbacks for single-post thread pages or standard XenForo containers
+    if (!body) body = doc.selectFirst('.message-inner .message-body .bbWrapper');
     if (!body) body = doc.selectFirst('.message-body .bbWrapper');
     if (!body) body = doc.selectFirst('.message-body');
     if (!body) body = doc.selectFirst('article.message .bbWrapper');
