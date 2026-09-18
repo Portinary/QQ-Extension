@@ -6,7 +6,7 @@ const mangayomiSources = [{
   "iconUrl": "https://forum.questionablequesting.com/favicon.ico",
   "typeSource": "single",
   "itemType": 2,
-  "version": "1.1.4",
+  "version": "1.1.5",
   "pkgPath": "",
   "notes": ""
 }];
@@ -111,11 +111,25 @@ class DefaultExtension extends MProvider {
 
   async search(query, page, filters) {
     const term = query.trim();
-    // Corrected XenForo 2.2+ search URL: q= for term, c[title_only]=1 for title search
+    // XenForo title-only search. Uses keywords= for compatibility with
+    // Mangayomi's Client, plus c[title_only]=1 and o=date sorting.
     const titleUrl =
-      `${SITE}/search/search?q=${encodeURIComponent(term)}` +
+      `${SITE}/search/search?keywords=${encodeURIComponent(term)}` +
       `&c[title_only]=1&o=date&page=${page}`;
     const titleResults = await this.runSearch(titleUrl);
+
+    if (titleResults.length === 0) {
+      // Fallback: search without title_only to confirm endpoint reachability
+      const fallbackUrl =
+        `${SITE}/search/search?keywords=${encodeURIComponent(term)}` +
+        `&o=date&page=${page}`;
+      try {
+        const fallbackResults = await this.runSearch(fallbackUrl);
+        return { list: fallbackResults, hasNextPage: fallbackResults.length >= 20 };
+      } catch (_e) {
+        return { list: [], hasNextPage: false };
+      }
+    }
 
     const isSingleWord = !term.includes(' ') && term.length > 0;
     if (!isSingleWord || page !== 1) {
@@ -266,7 +280,8 @@ class DefaultExtension extends MProvider {
       titleHtml = titleHtml.replace(/<span class="label-append[^>]*>.*?<\/span>/gi, '');
 
       const tempDoc = new Document(titleHtml);
-      rawTitle = tempDoc.text.trim() || titleEl.text.trim();
+      // Defensive trim: protects against null text from empty fragments
+      rawTitle = (tempDoc.text || '').trim() || (titleEl.text || '').trim();
     }
     if (!rawTitle || rawTitle === 'Untitled') {
       const ogTitle = doc.selectFirst('meta[property="og:title"]');
@@ -275,7 +290,7 @@ class DefaultExtension extends MProvider {
     const title = this.stripTitlePrefix(rawTitle);
 
     const authorEl = doc.selectFirst('.username');
-    const author = authorEl ? authorEl.text.trim() : 'Unknown';
+    const author = authorEl ? (authorEl.text || '').trim() : 'Unknown';
 
     let description = '';
     const headerDesc = doc.selectFirst('.threadmarkListingHeader-extraInfo .bbWrapper');
@@ -299,7 +314,7 @@ class DefaultExtension extends MProvider {
     const tabs = doc.select('.block-tabHeader--threadmarkCategoryTabs a.tabs-tab');
     for (const el of tabs) {
       const href = el.attr('href');
-      const label = el.text.trim();
+      const label = (el.text || '').trim();
       if (!href) continue;
 
       const fullUrl = href.startsWith('http') ? href : SITE + href;
