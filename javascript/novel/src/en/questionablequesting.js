@@ -6,7 +6,7 @@ const mangayomiSources = [{
   "iconUrl": "https://forum.questionablequesting.com/favicon.ico",
   "typeSource": "single",
   "itemType": 2,
-  "version": "1.2.9.6",
+  "version": "1.2.9.7",
   "pkgPath": "",
   "notes": ""
 }];
@@ -379,11 +379,9 @@ class DefaultExtension extends MProvider {
     const absoluteUrl = this.normalizeChapterUrl(url);
     const client = new Client();
     
-    // 1. Fetch post page
     let res = await client.get(absoluteUrl, this.getHeaders(absoluteUrl));
     let finalUrl = absoluteUrl;
 
-    // Follow redirects for threadmarks landing on full thread paths
     if (res.statusCode === 301 || res.statusCode === 302 || res.statusCode === 303) {
       const location = res.headers && (res.headers['location'] || res.headers['Location']);
       if (location) {
@@ -394,23 +392,35 @@ class DefaultExtension extends MProvider {
 
     const doc = new Document(res.body);
 
-    // 2. Select XenForo post container
-    let post = doc.selectFirst('.message-body');
-    if (!post) post = doc.selectFirst('.message-content');
-    if (!post) post = doc.selectFirst('article.message');
+    // 1. Extract post ID from original URL, redirected URL, or URL anchor fragment (#post-XXXXX)
+    let postId = null;
+    const postMatch = absoluteUrl.match(/(?:post-|\/posts\/)(\d+)/) || finalUrl.match(/(?:post-|\/posts\/|#post-)(\d+)/);
+    if (postMatch) {
+      postId = postMatch[1];
+    }
 
-    let body = post ? post.selectFirst('.bbWrapper') : null;
-    if (!body) body = doc.selectFirst('.bbWrapper');
+    let body = null;
 
-    // Emergency fallback for image-only posts outside standard wrappers
-    if (!body) {
-      const imgElements = doc.select('.message-inner img, article img, .bbImageContainer img');
-      if (imgElements && imgElements.length > 0) {
-        const imgsHtml = imgElements.map(img => img.outerHtml).join('<br/>');
-        const cleanedHtml = await this.cleanHtmlContent(imgsHtml);
-        return `<html><body>${cleanedHtml}</body></html>`;
+    // 2. Target the EXACT post by ID to avoid picking up reader comments
+    if (postId) {
+      const targetPost = doc.selectFirst(`#post-${postId}, article[data-content="post-${postId}"], [id="js-post-${postId}"]`);
+      if (targetPost) {
+        body = targetPost.selectFirst('.message-body .bbWrapper') || 
+               targetPost.selectFirst('.message-body') || 
+               targetPost.selectFirst('.bbWrapper');
       }
     }
+
+    // 3. Fallback: If no post ID matched, target the original thread author's post (ignore viewer replies)
+    if (!body) {
+      const firstPost = doc.selectFirst('article.message--post, .js-post:first-child, .message:first-of-type');
+      if (firstPost) {
+        body = firstPost.selectFirst('.message-body .bbWrapper') || firstPost.selectFirst('.bbWrapper');
+      }
+    }
+
+    // 4. Final safety fallback
+    if (!body) body = doc.selectFirst('.message-body .bbWrapper') || doc.selectFirst('.bbWrapper');
 
     if (!body) {
       return '<html><body><p>Chapter content not found.</p></body></html>';
