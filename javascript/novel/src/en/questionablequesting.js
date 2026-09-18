@@ -7,7 +7,7 @@ const mangayomiSources = [{
   "typeSource": "single",
   "isManga": false,
   "itemType": 2,
-  "version": "1.0.3",
+  "version": "1.0.4",
   "dateFormat": "",
   "dateFormatLocale": "",
   "isNsfw": true,
@@ -18,13 +18,12 @@ const SITE = 'https://forum.questionablequesting.com';
 const NSFW_CREATIVE_WRITING_ID = 29;
 const PER_PAGE = 200;
 
-class DefaultExtension extends MProvider {
-  getHeaders(url) {
-    return {
-      'User-Agent': 'Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36'
-    };
-  }
+// Define headers as a global constant to avoid 'this' context issues
+const HEADERS = {
+  'User-Agent': 'Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36'
+};
 
+class DefaultExtension extends MProvider {
   upgradeAvatar(src) {
     if (!src) return '';
     const upgraded = src.replace(/\/avatars\/[sm]\//, '/avatars/l/');
@@ -47,21 +46,12 @@ class DefaultExtension extends MProvider {
   }
 
   async getPopular(page) {
-    // --- DIAGNOSTIC BLOCK ---
-    if (typeof Client === 'undefined') {
-      throw new Error('getPopular DIAGNOSTIC: The global "Client" is undefined.');
-    }
-    if (typeof Document === 'undefined') {
-      throw new Error('getPopular DIAGNOSTIC: The global "Document" is undefined.');
-    }
-    // --- END DIAGNOSTIC BLOCK ---
-
     const safePage = page > 1 ? page : 1;
     const baseUrl = `${SITE}/forums/nsfw-creative-writing.${NSFW_CREATIVE_WRITING_ID}`;
     const url = safePage === 1 ? `${baseUrl}/` : `${baseUrl}/page-${safePage}`;
 
     const client = new Client();
-    const res = await client.get(url, this.getHeaders(url));
+    const res = await client.get(url, HEADERS);
     const doc = new Document(res.body);
 
     const novels = [];
@@ -94,7 +84,7 @@ class DefaultExtension extends MProvider {
 
   async runSearch(url) {
     const client = new Client();
-    const res = await client.get(url, this.getHeaders(url));
+    const res = await client.get(url, HEADERS);
     const doc = new Document(res.body);
 
     const novels = [];
@@ -214,7 +204,7 @@ class DefaultExtension extends MProvider {
   async fetchCategory(baseUrl, prefix) {
     const client = new Client();
     const firstUrl = `${baseUrl}${baseUrl.includes('?') ? '&' : '?'}per_page=${PER_PAGE}`;
-    const resFirst = await client.get(firstUrl, this.getHeaders(firstUrl));
+    const resFirst = await client.get(firstUrl, HEADERS);
     const docFirst = new Document(resFirst.body);
 
     const { pages } = this.countChaptersAndPages(docFirst);
@@ -222,7 +212,7 @@ class DefaultExtension extends MProvider {
 
     for (let p = 2; p <= pages; p++) {
       const pageUrl = `${firstUrl}&page=${p}`;
-      const resP = await client.get(pageUrl, this.getHeaders(pageUrl));
+      const resP = await client.get(pageUrl, HEADERS);
       const docP = new Document(resP.body);
       chapters = chapters.concat(this.extractChapters(docP, prefix));
     }
@@ -260,7 +250,7 @@ class DefaultExtension extends MProvider {
 
     const client = new Client();
     const defaultUrl = `${SITE}/threads/${slug}/threadmarks`;
-    const res = await client.get(`${defaultUrl}?per_page=${PER_PAGE}`, this.getHeaders(defaultUrl));
+    const res = await client.get(`${defaultUrl}?per_page=${PER_PAGE}`, HEADERS);
     const doc = new Document(res.body);
 
     const titleEl = doc.querySelectorAll('.p-title-value')[0];
@@ -287,7 +277,7 @@ class DefaultExtension extends MProvider {
     let imageUrl = '';
     const threadMainUrl = `${SITE}/threads/${slug}/`;
     try {
-      const resThread = await client.get(threadMainUrl, this.getHeaders(threadMainUrl));
+      const resThread = await client.get(threadMainUrl, HEADERS);
       const docThread = new Document(resThread.body);
       const avatarImg = docThread.querySelectorAll('img[class^="avatar-u"]')[0];
       if (avatarImg) {
@@ -333,10 +323,6 @@ class DefaultExtension extends MProvider {
   }
 
   async getPageList(url) {
-    // For novel sources, Mangayomi expects getPageList to return an array of
-    // URLs that are used by the reader. Since QQ chapters are forum posts
-    // rather than image galleries, we return the chapter URL itself as a
-    // single "page". The reader will open it as a web page.
     return [url];
   }
 
