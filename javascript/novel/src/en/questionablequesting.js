@@ -6,7 +6,7 @@ const mangayomiSources = [{
   "iconUrl": "https://forum.questionablequesting.com/favicon.ico",
   "typeSource": "single",
   "itemType": 2,
-  "version": "1.0.8",
+  "version": "1.0.9",
   "pkgPath": "",
   "notes": ""
 }];
@@ -258,14 +258,12 @@ class DefaultExtension extends MProvider {
     const titleEl = doc.selectFirst('.p-title-value');
     let rawTitle = 'Untitled';
     if (titleEl) {
-      // Use string replacement instead of .remove() for cross-runtime safety
       let titleHtml = titleEl.outerHtml || titleEl.text || '';
       titleHtml = titleHtml.replace(/<span class="unreadLink[^>]*>.*?<\/span>/gi, '');
       titleHtml = titleHtml.replace(/<span class="labelLink[^>]*>.*?<\/span>/gi, '');
       titleHtml = titleHtml.replace(/<span class="label[^>]*>.*?<\/span>/gi, '');
       titleHtml = titleHtml.replace(/<span class="label-append[^>]*>.*?<\/span>/gi, '');
 
-      // Extract text from the cleaned HTML
       const tempDoc = new Document(titleHtml);
       rawTitle = tempDoc.text.trim() || titleEl.text.trim();
     }
@@ -323,6 +321,10 @@ class DefaultExtension extends MProvider {
       extras.push(...catChapters);
     }
 
+    // Reverse only the main chapters so the reader starts at chapter 1.
+    // Extras keep their original order.
+    const allChapters = [...mainChapters.reverse(), ...extras];
+
     return {
       name: title,
       link: url,
@@ -330,7 +332,7 @@ class DefaultExtension extends MProvider {
       description,
       author,
       status: 0,
-      chapters: [...mainChapters, ...extras],
+      chapters: allChapters,
     };
   }
 
