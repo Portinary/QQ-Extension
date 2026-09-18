@@ -8,9 +8,8 @@
     "dateFormat": "",
     "dateFormatLocale": "",
     "isNsfw": true,
-    "isManga": false,
     "hasCloudflare": true,
-    "version": "1.0.1",
+    "version": "1.0.2",
     "sourceCodeUrl": "https://raw.githubusercontent.com/Portinary/QQ-Extension/mangayomi/javascript/novel/src/en/questionablequesting.js",
     "apiUrl": ""
   }
