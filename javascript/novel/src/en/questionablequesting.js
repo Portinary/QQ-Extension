@@ -169,46 +169,46 @@ class DefaultExtension extends MProvider {
     return { list: merged, hasNextPage: merged.length >= 20 };
   }
 
-extractChapters(doc, prefix) {
-  const chapters = [];
-  // Support both structItem and direct threadmark list items
-  const items = doc.select('.structItem--threadmark, .threadmarkItem, .structItemContainer .structItem');
+  extractChapters(doc, prefix) {
+    const chapters = [];
+    // Support both structItem and direct threadmark list items
+    const items = doc.select('.structItem--threadmark, .threadmarkItem, .structItemContainer .structItem');
   
-  for (const el of items) {
-    const classAttr = el.attr('class') || '';
-    if (classAttr.includes('structItem--threadmark-filler')) continue;
+    for (const el of items) {
+      const classAttr = el.attr('class') || '';
+      if (classAttr.includes('structItem--threadmark-filler')) continue;
 
-    const linkEl = el.selectFirst('.structItem-title a, .threadmark-title a, a[href*="/threads/"]');
-    if (!linkEl) continue;
+      const linkEl = el.selectFirst('.structItem-title a, .threadmark-title a, a[href*="/threads/"]');
+      if (!linkEl) continue;
 
-    const rawHref = linkEl.attr('href');
-    if (!rawHref) continue;
+      const rawHref = linkEl.attr('href');
+      if (!rawHref) continue;
 
-    const href = this.normalizeChapterUrl(rawHref);
-    const rawName = linkEl.text.trim();
-    if (!rawName) continue;
+      const href = this.normalizeChapterUrl(rawHref);
+      const rawName = linkEl.text.trim();
+      if (!rawName) continue;
 
-    const name = prefix ? `${prefix} - ${rawName}` : rawName;
+      const name = prefix ? `${prefix} - ${rawName}` : rawName;
 
-    // Parse timestamp
-    let dateUpload = null;
-    const timeEl = el.selectFirst('time');
-    if (timeEl) {
-      const dataTime = timeEl.attr('data-time');
-      if (dataTime && /^\d+$/.test(dataTime)) {
-        dateUpload = (parseInt(dataTime, 10) * 1000).toString();
+      // Parse timestamp
+      let dateUpload = null;
+      const timeEl = el.selectFirst('time');
+      if (timeEl) {
+        const dataTime = timeEl.attr('data-time');
+        if (dataTime && /^\d+$/.test(dataTime)) {
+          dateUpload = (parseInt(dataTime, 10) * 1000).toString();
+        }
       }
+
+      chapters.push({
+        name,
+        url: href,
+        ...(dateUpload && { dateUpload })
+      });
     }
 
-    chapters.push({
-      name,
-      url: href,
-      ...(dateUpload && { dateUpload })
-    });
+    return chapters;
   }
-
-  return chapters;
-}
 
   countChaptersAndPages(doc) {
     let count = 0;
