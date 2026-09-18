@@ -6,7 +6,7 @@ const mangayomiSources = [{
   "iconUrl": "https://forum.questionablequesting.com/favicon.ico",
   "typeSource": "single",
   "itemType": 2,
-  "version": "1.3.2",
+  "version": "1.3.3",
   "pkgPath": "",
   "notes": ""
 }];
@@ -19,7 +19,9 @@ class DefaultExtension extends MProvider {
   getHeaders(url) {
     return {
       'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
-      'Referer': SITE
+      'Referer': SITE,
+      'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+      'Accept-Language': 'en-US,en;q=0.5'
     };
   }
 
@@ -47,14 +49,6 @@ class DefaultExtension extends MProvider {
     return h;
   }
 
-  normalizeChapterUrl(href) {
-    if (!href) return href;
-    if (!href.startsWith('http')) {
-      return SITE + (href.startsWith('/') ? href : '/' + href);
-    }
-    return href;
-  }
-
   async getPopular(page) {
     const safePage = page > 1 ? page : 1;
     const baseUrl = `${SITE}/forums/nsfw-creative-writing.${NSFW_CREATIVE_WRITING_ID}`;
@@ -77,13 +71,13 @@ class DefaultExtension extends MProvider {
       if (!rawHref) continue;
 
       novels.push({
-        name: this.stripTitlePrefix(linkEl.text.trim()),
-        link: this.normalizeThreadUrl(rawHref),
-        imageUrl: (el.selectFirst('.structItem-cell--icon img') ? this.upgradeAvatar(el.selectFirst('.structItem-cell--icon img').attr('src') || el.selectFirst('.structItem-cell--icon img').attr('data-src')) : ''),
+        'name': this.stripTitlePrefix(linkEl.text.trim()),
+        'link': this.normalizeThreadUrl(rawHref),
+        'imageUrl': (el.selectFirst('.structItem-cell--icon img') ? this.upgradeAvatar(el.selectFirst('.structItem-cell--icon img').attr('src') || el.selectFirst('.structItem-cell--icon img').attr('data-src')) : ''),
       });
     }
 
-    return { list: novels, hasNextPage: novels.length >= 20 };
+    return { 'list': novels, 'hasNextPage': novels.length >= 20 };
   }
 
   async runSearch(url) {
@@ -108,9 +102,9 @@ class DefaultExtension extends MProvider {
       if (!href) continue;
 
       novels.push({
-        name: this.stripTitlePrefix(linkEl.text.trim()),
-        link: this.normalizeThreadUrl(href),
-        imageUrl: (el.selectFirst('.contentRow-figure img') ? this.upgradeAvatar(el.selectFirst('.contentRow-figure img').attr('src') || el.selectFirst('.contentRow-figure img').attr('data-src')) : ''),
+        'name': this.stripTitlePrefix(linkEl.text.trim()),
+        'link': this.normalizeThreadUrl(href),
+        'imageUrl': (el.selectFirst('.contentRow-figure img') ? this.upgradeAvatar(el.selectFirst('.contentRow-figure img').attr('src') || el.selectFirst('.contentRow-figure img').attr('data-src')) : ''),
       });
     }
 
@@ -136,23 +130,20 @@ class DefaultExtension extends MProvider {
       merged.push(n);
     }
 
-    return { list: merged, hasNextPage: merged.length >= 20 };
+    return { 'list': merged, 'hasNextPage': merged.length >= 20 };
   }
 
   extractChapters(doc, prefix) {
     const chapters = [];
-    const items = doc.select('.structItem--threadmark, .threadmarkItem, .structItemContainer .structItem');
+    const items = doc.select('.structItem--threadmark');
 
     for (const el of items) {
-      if ((el.attr('class') || '').includes('structItem--threadmark-filler')) continue;
-
-      const linkEl = el.selectFirst('.structItem-title a, .threadmark-title a, a[href*="/threads/"], a[href*="/posts/"]');
+      const linkEl = el.selectFirst('.structItem-title a');
       if (!linkEl) continue;
 
       const rawHref = linkEl.attr('href');
       if (!rawHref) continue;
 
-      // DO NOT strip fragments or query parameters; pass full raw link
       const href = rawHref.startsWith('http') ? rawHref : SITE + (rawHref.startsWith('/') ? rawHref : '/' + rawHref);
       const rawName = linkEl.text.trim();
       if (!rawName) continue;
@@ -167,15 +158,16 @@ class DefaultExtension extends MProvider {
       }
 
       chapters.push({
-        name: prefix ? `${prefix} - ${rawName}` : rawName,
-        url: href,
+        'name': prefix ? `${prefix} - ${rawName}` : rawName,
+        'url': href,
+        'scanlator': prefix || "",
         ...(dateUpload && { dateUpload })
       });
     }
 
     return chapters;
   }
-  
+
   countChaptersAndPages(doc) {
     let count = 0;
     const statsList = doc.select('.threadmarkListingHeader-stats dl.pairs');
@@ -274,48 +266,45 @@ class DefaultExtension extends MProvider {
     }
 
     return {
-      name: title,
-      link: url,
-      imageUrl: '',
-      description,
-      author,
-      status: 0,
-      chapters: [...mainChapters.reverse(), ...extras.reverse()],
+      'name': title,
+      'link': url,
+      'imageUrl': '',
+      'description': description,
+      'author': author,
+      'status': 0,
+      'chapters': [...mainChapters.reverse(), ...extras.reverse()],
     };
-  }
-
-  async getPageList(url) {
-    return [{ url: this.normalizeChapterUrl(url) }];
   }
 
   async getHtmlContent(name, url) {
     const client = new Client();
-    let currentUrl = url.startsWith('http') ? url : SITE + (url.startsWith('/') ? url : '/' + url);
+    let targetUrl = url.startsWith('http') ? url : SITE + (url.startsWith('/') ? url : '/' + url);
 
-    // Fetch page & follow up to 3 redirects
-    let res = await client.get(currentUrl, this.getHeaders(currentUrl));
+    let res = await client.get(targetUrl, this.getHeaders(targetUrl));
+    
+    // Follow redirect if XenForo redirects post permalink to page anchor
     let redirectCount = 0;
     while ((res.statusCode >= 300 && res.statusCode < 400) && redirectCount < 3) {
       const location = res.headers && (res.headers['location'] || res.headers['Location']);
       if (!location) break;
-      currentUrl = location.startsWith('http') ? location : SITE + location;
-      res = await client.get(currentUrl, this.getHeaders(currentUrl));
+      targetUrl = location.startsWith('http') ? location : SITE + location;
+      res = await client.get(targetUrl, this.getHeaders(targetUrl));
       redirectCount++;
     }
 
     const doc = new Document(res.body);
 
-    // Extract post ID from original URL or redirected location
-    const postMatch = url.match(/(?:post-|\/posts\/|#post-)(\d+)/) || currentUrl.match(/(?:post-|\/posts\/|#post-)(\d+)/);
+    // Parse target post ID from URL (e.g., /post-12366882 or #post-12366882)
+    const postMatch = url.match(/post-(\d+)/) || targetUrl.match(/post-(\d+)/);
     const postId = postMatch ? postMatch[1] : null;
 
     let body = null;
 
-    // Direct match by post ID
     if (postId) {
+      // Find element matching post ID container
       const targetArticle = 
-        doc.selectFirst(`#post-${postId}`) || 
-        doc.selectFirst(`#js-post-${postId}`) || 
+        doc.selectFirst(`article#js-post-${postId}`) || 
+        doc.selectFirst(`article#post-${postId}`) || 
         doc.selectFirst(`[data-content="post-${postId}"]`) ||
         doc.selectFirst(`article[id*="${postId}"]`);
 
@@ -324,33 +313,27 @@ class DefaultExtension extends MProvider {
       }
     }
 
-    // Threadmark single post landing fallback
-    if (!body) body = doc.selectFirst('.article-single .bbWrapper');
-    if (!body) body = doc.selectFirst('.message-threadmark .bbWrapper');
-    if (!body) body = doc.selectFirst('.message--post .bbWrapper');
-    if (!body) body = doc.selectFirst('.message-body');
+    // Fallback selectors for threadmark landed single posts or page-1 thread posts
+    if (!body) body = doc.selectFirst('.message-inner .bbWrapper');
+    if (!body) body = doc.selectFirst('article.message .bbWrapper');
+    if (!body) body = doc.selectFirst('.message-body .bbWrapper');
     if (!body) body = doc.selectFirst('.bbWrapper');
 
     if (!body) {
-      return '<html><body><p>Chapter content not found.</p></body></html>';
+      throw new Error("Could not find chapter content");
     }
 
-    const cleanedHtml = await this.cleanHtmlContent(body.outerHtml || '');
-    return `<html><body>${cleanedHtml}</body></html>`;
+    return this.cleanHtmlContent(body.outerHtml || '');
   }
 
-  async cleanHtmlContent(html) {
-    if (!html) return '<p>Chapter content not found.</p>';
-    
-    let cleaned = html;
+  cleanHtmlContent(html) {
+    if (!html) return "";
 
-    cleaned = cleaned.replace(/<(script|noscript|iframe|video|audio|object|embed)\b[^<]*(?:(?!<\/\1>)<[^<]*)*<\/\1>/gi, '');
-
-    // Unwrap XenForo spoilers safely without recursion loops
-    cleaned = cleaned.replace(/<div[^>]*class="[^"]*bbCodeSpoiler[^"]*"[^>]*>[\s\S]*?<button[^>]*>([\s\S]*?)<\/button>[\s\S]*?<div[^>]*class="[^"]*bbCodeSpoiler-content[^"]*"[^>]*>([\s\S]*?)<\/div>\s*<\/div>/gi, (match, button, content) => {
-      const title = button.replace(/<[^>]+>/g, '').trim() || 'Spoiler';
-      return `<div style="margin: 10px 0; padding: 8px; border: 1px solid #ccc; background: #f9f9f9;"><p><strong>[${title}]</strong></p>${content}</div>`;
-    });
+    let cleaned = html
+      .replace(/<(script|noscript|iframe|video|audio|object|embed)\b[^<]*(?:(?!<\/\1>)<[^<]*)*<\/\1>/gi, '')
+      .replace(/<style\b[^<]*(?:(?!<\/style>)<[^<]*)*<\/style>/gi, '')
+      .replace(/\sclass=["'][^"']*["']/g, "")
+      .replace(/\sid=["'][^"']*["']/g, "");
 
     return this.fixImages(cleaned);
   }
@@ -358,12 +341,10 @@ class DefaultExtension extends MProvider {
   fixImages(html) {
     return html.replace(/<img([^>]*?)>/gi, (match, attrs) => {
       const dataSrcMatch = attrs.match(/data-src=["']([^"']+)["']/i);
-      const dataUrlMatch = attrs.match(/data-url=["']([^"']+)["']/i);
       const srcMatch = attrs.match(/\bsrc=["']([^"']+)["']/i);
 
       let realSrc = '';
       if (dataSrcMatch && !dataSrcMatch[1].startsWith('data:')) realSrc = dataSrcMatch[1];
-      else if (dataUrlMatch && !dataUrlMatch[1].startsWith('data:')) realSrc = dataUrlMatch[1];
       else if (srcMatch && !srcMatch[1].startsWith('data:')) realSrc = srcMatch[1];
 
       if (!realSrc) return match;
@@ -374,11 +355,31 @@ class DefaultExtension extends MProvider {
         absolute = SITE + absolute;
       }
 
-      return `<img src="${absolute}" style="max-width:100%; height:auto; display:block; margin: 10px auto;" />`;
+      return `<img src="${absolute}" style="max-width:100%; height:auto;" />`;
     });
   }
 
-  async getVideoList(url) { return []; }
-  getFilterList() { return []; }
-  getSourcePreferences() { return []; }
+  get supportsLatest() {
+    return false;
+  }
+
+  async getLatestUpdates(page) {
+    return await this.getPopular(page);
+  }
+
+  async getVideoList(url) {
+    throw new Error("getVideoList not implemented");
+  }
+
+  async getPageList(url) {
+    throw new Error("getPageList not implemented");
+  }
+
+  getFilterList() {
+    return [];
+  }
+
+  getSourcePreferences() {
+    return [];
+  }
 }
