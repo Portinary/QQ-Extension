@@ -6,7 +6,7 @@ const mangayomiSources = [{
   "iconUrl": "https://forum.questionablequesting.com/favicon.ico",
   "typeSource": "single",
   "itemType": 2,
-  "version": "1.1.3",
+  "version": "1.1.4",
   "pkgPath": "",
   "notes": ""
 }];
@@ -111,10 +111,10 @@ class DefaultExtension extends MProvider {
 
   async search(query, page, filters) {
     const term = query.trim();
-    // Adjusted search URL: removed c[title_only]=1 which was breaking results
+    // Corrected XenForo 2.2+ search URL: q= for term, c[title_only]=1 for title search
     const titleUrl =
-      `${SITE}/search/search?keywords=${encodeURIComponent(term)}` +
-      `&t=thread&page=${page}`;
+      `${SITE}/search/search?q=${encodeURIComponent(term)}` +
+      `&c[title_only]=1&o=date&page=${page}`;
     const titleResults = await this.runSearch(titleUrl);
 
     const isSingleWord = !term.includes(' ') && term.length > 0;
