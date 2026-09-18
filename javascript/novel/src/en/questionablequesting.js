@@ -6,7 +6,7 @@ const mangayomiSources = [{
   "iconUrl": "https://forum.questionablequesting.com/favicon.ico",
   "typeSource": "single",
   "itemType": 2,
-  "version": "1.3.3",
+  "version": "1.3.4",
   "pkgPath": "",
   "notes": ""
 }];
@@ -156,9 +156,9 @@ class DefaultExtension extends MProvider {
       }
 
       chapters.push({
-        'name': prefix ? `${prefix} - ${rawName}` : rawName,
+        'name': prefix ? `[${prefix}] ${rawName}` : rawName,
         'url': href,
-        'scanlator': prefix || "",
+        'scanlator': prefix || "Main",
         ...(dateUpload && { dateUpload })
       });
     }
@@ -181,7 +181,8 @@ class DefaultExtension extends MProvider {
 
   async fetchCategory(baseUrl, prefix) {
     const client = new Client();
-    const firstUrl = `${baseUrl}${baseUrl.includes('?') ? '&' : '?'}per_page=${PER_PAGE}`;
+    const joinChar = baseUrl.includes('?') ? '&' : '?';
+    const firstUrl = `${baseUrl}${joinChar}per_page=${PER_PAGE}`;
     const resFirst = await client.get(firstUrl, this.getHeaders(firstUrl));
     const docFirst = new Document(resFirst.body);
 
@@ -254,13 +255,11 @@ class DefaultExtension extends MProvider {
       categories.push({ label: 'Threadmarks', url: defaultUrl, isMain: true });
     }
 
-    const mainCat = categories.find(c => c.isMain) || categories[0];
-    const mainChapters = await this.fetchCategory(mainCat.url, '');
-
-    const extras = [];
+    const allChapters = [];
     for (const cat of categories) {
-      if (cat.isMain) continue;
-      extras.push(...(await this.fetchCategory(cat.url, cat.label)));
+      const label = cat.isMain ? '' : cat.label;
+      const catChapters = await this.fetchCategory(cat.url, label);
+      allChapters.push(...catChapters.reverse());
     }
 
     return {
@@ -270,7 +269,7 @@ class DefaultExtension extends MProvider {
       'description': description,
       'author': author,
       'status': 0,
-      'chapters': [...mainChapters.reverse(), ...extras.reverse()],
+      'chapters': allChapters,
     };
   }
 
@@ -280,7 +279,6 @@ class DefaultExtension extends MProvider {
 
     let res = await client.get(targetUrl, this.getHeaders(targetUrl));
 
-    // Follow redirect if XenForo redirects post permalink to thread page
     let redirectCount = 0;
     while ((res.statusCode >= 300 && res.statusCode < 400) && redirectCount < 3) {
       const location = res.headers && (res.headers['location'] || res.headers['Location']);
@@ -292,13 +290,14 @@ class DefaultExtension extends MProvider {
 
     const doc = new Document(res.body);
 
-    // Extract post ID from original or redirected URL (e.g., post-12366882)
+    // Extract exact post ID from permalink or redirected URL
     const postMatch = url.match(/post-(\d+)/) || targetUrl.match(/post-(\d+)/);
     const postId = postMatch ? postMatch[1] : null;
 
     let body = null;
 
     if (postId) {
+      // Direct lookup for targeted threadmark post
       const targetArticle = 
         doc.selectFirst(`article#js-post-${postId}`) || 
         doc.selectFirst(`article#post-${postId}`) || 
@@ -310,10 +309,9 @@ class DefaultExtension extends MProvider {
       }
     }
 
-    // Fallbacks if post ID selection isn't reached directly
+    // Secondary selector: Search for the main threadmark body container
     if (!body) body = doc.selectFirst('.message-inner .bbWrapper');
-    if (!body) body = doc.selectFirst('article.message .bbWrapper');
-    if (!body) body = doc.selectFirst('.message-body .bbWrapper');
+    if (!body) body = doc.selectFirst('article.message-body .bbWrapper');
     if (!body) body = doc.selectFirst('.bbWrapper');
 
     if (!body) {
