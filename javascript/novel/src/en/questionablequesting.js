@@ -6,7 +6,7 @@ const mangayomiSources = [{
   "iconUrl": "https://forum.questionablequesting.com/favicon.ico",
   "typeSource": "single",
   "itemType": 2,
-  "version": "1.2.9.9",
+  "version": "1.3.0",
   "pkgPath": "",
   "notes": ""
 }];
@@ -18,7 +18,7 @@ const PER_PAGE = 200;
 class DefaultExtension extends MProvider {
   getHeaders(url) {
     return {
-      'User-Agent': 'Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36',
+      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
       'Referer': SITE
     };
   }
@@ -50,17 +50,12 @@ class DefaultExtension extends MProvider {
   normalizeChapterUrl(href) {
     if (!href) return href;
 
-    const postMatch = href.match(/(?:post-|\/posts\/)(\d+)/);
-    if (postMatch) {
-      return `${SITE}/posts/${postMatch[1]}/`;
-    }
-
     if (!href.startsWith('http')) {
       return SITE + (href.startsWith('/') ? href : '/' + href);
     }
     return href;
   }
-  
+
   async getPopular(page) {
     const safePage = page > 1 ? page : 1;
     const baseUrl = `${SITE}/forums/nsfw-creative-writing.${NSFW_CREATIVE_WRITING_ID}`;
@@ -103,12 +98,10 @@ class DefaultExtension extends MProvider {
     const client = new Client();
     let res = await client.get(url, this.getHeaders(url));
 
-    if (res.statusCode === 303 || res.statusCode === 302) {
+    if (res.statusCode === 303 || res.statusCode === 302 || res.statusCode === 301) {
       const location = res.headers && (res.headers['location'] || res.headers['Location']);
       if (location) {
-        const absoluteLocation = location.startsWith('http')
-          ? location
-          : SITE + location;
+        const absoluteLocation = location.startsWith('http') ? location : SITE + location;
         res = await client.get(absoluteLocation, this.getHeaders(absoluteLocation));
       }
     }
@@ -178,7 +171,7 @@ class DefaultExtension extends MProvider {
       const classAttr = el.attr('class') || '';
       if (classAttr.includes('structItem--threadmark-filler')) continue;
 
-      const linkEl = el.selectFirst('.structItem-title a, .threadmark-title a, a[href*="/threads/"]');
+      const linkEl = el.selectFirst('.structItem-title a, .threadmark-title a, a[href*="/threads/"], a[href*="/posts/"]');
       if (!linkEl) continue;
 
       const rawHref = linkEl.attr('href');
@@ -370,7 +363,6 @@ class DefaultExtension extends MProvider {
   }
 
   async getPageList(url) {
-    // Mangayomi requires getPageList to return an array containing the target chapter URL
     const absoluteUrl = this.normalizeChapterUrl(url);
     return [{ url: absoluteUrl }];
   }
@@ -378,40 +370,45 @@ class DefaultExtension extends MProvider {
   async getHtmlContent(name, url) {
     const absoluteUrl = this.normalizeChapterUrl(url);
     const client = new Client();
-    
-    // 1. Fetch page and follow redirects
-    let res = await client.get(absoluteUrl, this.getHeaders(absoluteUrl));
-    let finalUrl = absoluteUrl;
 
-    if (res.statusCode === 301 || res.statusCode === 302 || res.statusCode === 303) {
+    // 1. Resolve redirect chain manually up to 3 deep
+    let currentUrl = absoluteUrl;
+    let res = await client.get(currentUrl, this.getHeaders(currentUrl));
+    
+    let redirectCount = 0;
+    while ((res.statusCode >= 300 && res.statusCode < 400) && redirectCount < 3) {
       const location = res.headers && (res.headers['location'] || res.headers['Location']);
-      if (location) {
-        finalUrl = location.startsWith('http') ? location : SITE + location;
-        res = await client.get(finalUrl, this.getHeaders(finalUrl));
-      }
+      if (!location) break;
+      currentUrl = location.startsWith('http') ? location : SITE + location;
+      res = await client.get(currentUrl, this.getHeaders(currentUrl));
+      redirectCount++;
     }
 
     const doc = new Document(res.body);
 
-    // 2. Extract post ID from original URL or redirected anchor fragment (#post-12366882)
+    // 2. Extract Post ID from URL or anchor fragment
     let postId = null;
-    const postMatch = absoluteUrl.match(/(?:post-|\/posts\/|#post-)(\d+)/) || finalUrl.match(/(?:post-|\/posts\/|#post-)(\d+)/);
+    const postMatch = absoluteUrl.match(/(?:post-|\/posts\/|#post-)(\d+)/) || currentUrl.match(/(?:post-|\/posts\/|#post-)(\d+)/);
     if (postMatch) {
       postId = postMatch[1];
     }
 
     let body = null;
 
-    // 3. Target the specific post element (#post-12366882)
+    // 3. Robust XenForo post target checking
     if (postId) {
-      const targetPost = doc.selectFirst(`#post-${postId}`) || doc.selectFirst(`[data-content="post-${postId}"]`);
-      if (targetPost) {
-        // Direct match for the .bbWrapper container inside that article
-        body = targetPost.selectFirst('.bbWrapper') || targetPost.selectFirst('.message-body');
+      const targetArticle = 
+        doc.selectFirst(`#post-${postId}`) || 
+        doc.selectFirst(`#js-post-${postId}`) || 
+        doc.selectFirst(`[data-content="post-${postId}"]`) ||
+        doc.selectFirst(`article[data-author][id*="${postId}"]`);
+
+      if (targetArticle) {
+        body = targetArticle.selectFirst('.bbWrapper') || targetArticle.selectFirst('.message-body');
       }
     }
 
-    // 4. General fallbacks for threadmarks/single posts
+    // 4. Fallback selectors
     if (!body) body = doc.selectFirst('.message--post .bbWrapper');
     if (!body) body = doc.selectFirst('.message-body .bbWrapper');
     if (!body) body = doc.selectFirst('.bbWrapper');
@@ -429,90 +426,23 @@ class DefaultExtension extends MProvider {
     
     let cleaned = html;
 
-    // 1. Remove scripts and media tags that break rendering
+    // Remove script and iframe elements
     cleaned = cleaned.replace(/<(script|noscript|iframe|video|audio|object|embed)\b[^<]*(?:(?!<\/\1>)<[^<]*)*<\/\1>/gi, '');
 
-    // 2. Expand spoilers
-    cleaned = this.unwrapSpoilers(cleaned);
+    // Transform XenForo spoilers safely without recursive loop bugs
+    cleaned = cleaned.replace(/<div[^>]*class="[^"]*bbCodeSpoiler[^"]*"[^>]*>[\s\S]*?<button[^>]*>([\s\S]*?)<\/button>[\s\S]*?<div[^>]*class="[^"]*bbCodeSpoiler-content[^"]*"[^>]*>([\s\S]*?)<\/div>\s*<\/div>/gi, (match, button, content) => {
+      const title = button.replace(/<[^>]+>/g, '').trim() || 'Spoiler';
+      return `<div style="margin: 10px 0; padding: 8px; border: 1px solid #ccc; background: #f9f9f9;"><p><strong>[${title}]</strong></p>${content}</div>`;
+    });
 
-    // 3. Fix image sources (handles lazy-loading and relative URLs)
+    // Fix images
     cleaned = this.fixImages(cleaned);
 
-    // 4. Clean up unnecessary attributes without destroying tags
-    cleaned = cleaned.replace(/\s(class|id)=["'][^"']*["']/gi, '');
-
     return cleaned;
-  }
-  
-  unwrapSpoilers(html) {
-    let result = html;
-    let safety = 0;
-
-    while (result.includes('bbCodeSpoiler') && safety < 20) {
-      safety++;
-
-      const startIdx = result.indexOf('bbCodeSpoiler');
-      if (startIdx === -1) break;
-
-      let divStart = result.lastIndexOf('<div', startIdx);
-      if (divStart === -1) break;
-
-      const labelStart = result.indexOf('bbCodeSpoiler-button-title', divStart);
-      let label = '';
-      if (labelStart !== -1) {
-        const labelOpen = result.indexOf('>', labelStart) + 1;
-        const labelClose = result.indexOf('</span>', labelOpen);
-        if (labelClose !== -1) {
-          label = result.substring(labelOpen, labelClose).replace(/<[^>]+>/g, '').trim();
-        }
-      }
-
-      const contentStart = result.indexOf('bbCodeSpoiler-content', divStart);
-      if (contentStart === -1) break;
-
-      const contentDivOpen = result.indexOf('>', contentStart) + 1;
-
-      let depth = 1;
-      let pos = contentDivOpen;
-      while (depth > 0 && pos < result.length) {
-        const nextOpen = result.indexOf('<div', pos);
-        const nextClose = result.indexOf('</div>', pos);
-
-        if (nextClose === -1) break;
-        if (nextOpen !== -1 && nextOpen < nextClose) {
-          depth++;
-          pos = nextOpen + 4;
-        } else {
-          depth--;
-          pos = nextClose + 6;
-        }
-      }
-
-      const contentEnd = pos - 6;
-      let content = result.substring(contentDivOpen, contentEnd);
-
-      const blockStart = content.indexOf('bbCodeBlock');
-      if (blockStart !== -1) {
-        const blockDivOpen = content.indexOf('>', blockStart) + 1;
-        const blockDivClose = content.lastIndexOf('</div>');
-        if (blockDivClose > blockDivOpen) {
-          content = content.substring(blockDivOpen, blockDivClose);
-        }
-      }
-
-      const heading = label
-        ? `<p><strong>[Spoiler: ${label}]</strong></p>`
-        : `<p><strong>[Spoiler]</strong></p>`;
-
-      result = result.substring(0, divStart) + heading + content + result.substring(pos);
-    }
-
-    return result;
   }
 
   fixImages(html) {
     return html.replace(/<img([^>]*?)>/gi, (match, attrs) => {
-      // XenForo image tags use data-url, data-src, or src for attachments
       const dataSrcMatch = attrs.match(/data-src=["']([^"']+)["']/i);
       const dataUrlMatch = attrs.match(/data-url=["']([^"']+)["']/i);
       const srcMatch = attrs.match(/\bsrc=["']([^"']+)["']/i);
@@ -524,7 +454,6 @@ class DefaultExtension extends MProvider {
 
       if (!realSrc) return match;
 
-      // Ensure full absolute URL
       let absolute = realSrc.trim();
       if (!absolute.startsWith('http://') && !absolute.startsWith('https://')) {
         if (!absolute.startsWith('/')) absolute = '/' + absolute;
