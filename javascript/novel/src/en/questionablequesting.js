@@ -6,7 +6,7 @@ const mangayomiSources = [{
   "iconUrl": "https://forum.questionablequesting.com/favicon.ico",
   "typeSource": "single",
   "itemType": 2,
-  "version": "1.3.9",
+  "version": "1.4.0",
   "pkgPath": "",
   "notes": ""
 }];
@@ -342,30 +342,11 @@ class DefaultExtension extends MProvider {
 
     let processed = html;
 
-    // Remove XenForo Lightbox anchor wrappers that intercept image clicks
-    processed = processed.replace(/<a\b[^>]*class=["'][^"']*lbContainer[^"']*["'][^>]*>(.*?)<\/a>/gi, '$1');
+    // Replace <img> tags with styled [Image Here] placeholder text block
+    processed = processed.replace(/<img[^>]*>/gi, '<p style="text-align: center; color: #888888;"><b>[Image Here]</b></p>');
 
-    // Convert images directly to native single img tags inside clear paragraph breaks
-    processed = processed.replace(/<img([^>]*?)>/gi, (match, attrs) => {
-      const dataUrlMatch = attrs.match(/data-url=["']([^"']+)["']/i);
-      const dataSrcMatch = attrs.match(/data-src=["']([^"']+)["']/i);
-      const srcMatch = attrs.match(/\bsrc=["']([^"']+)["']/i);
-
-      let realSrc = '';
-      if (dataUrlMatch && !dataUrlMatch[1].startsWith('data:')) realSrc = dataUrlMatch[1];
-      else if (dataSrcMatch && !dataSrcMatch[1].startsWith('data:')) realSrc = dataSrcMatch[1];
-      else if (srcMatch && !srcMatch[1].startsWith('data:')) realSrc = srcMatch[1];
-
-      if (!realSrc) return '';
-
-      let absolute = realSrc.trim();
-      if (!absolute.startsWith('http://') && !absolute.startsWith('https://')) {
-        if (!absolute.startsWith('/')) absolute = '/' + absolute;
-        absolute = SITE + absolute;
-      }
-
-      return `<br/><img src="${absolute}" /><br/>`;
-    });
+    // Replace attachment containers with [Image Here] placeholder
+    processed = processed.replace(/<a\b[^>]*class=["'][^"']*lbContainer[^"']*["'][^>]*>.*?<\/a>/gi, '<p style="text-align: center; color: #888888;"><b>[Image Here]</b></p>');
 
     return processed;
   }
