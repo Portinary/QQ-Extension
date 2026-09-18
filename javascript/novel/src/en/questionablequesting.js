@@ -6,7 +6,7 @@ const mangayomiSources = [{
   "iconUrl": "https://forum.questionablequesting.com/favicon.ico",
   "typeSource": "single",
   "itemType": 2,
-  "version": "1.1.1",
+  "version": "1.1.2",
   "pkgPath": "",
   "notes": ""
 }];
@@ -408,15 +408,18 @@ class DefaultExtension extends MProvider {
   }
 
   unwrapSpoilers(html) {
-    const spoilerRegex = /<div[^>]*class="[^"]*bbCodeSpoiler[^"]*"[^>]*>([\s\S]*?)<\/div>\s*<\/div>\s*<\/div>/gi;
+    // More tolerant regex that handles variations in the closing structure.
+    const spoilerRegex = /<div[^>]*class="[^"]*bbCodeSpoiler[^"]*"[^>]*>([\s\S]*?)(?=<div[^>]*class="[^"]*bbCodeSpoiler[^"]*"|<\/div>\s*<\/div>\s*<\/div>|$)/gi;
 
     return html.replace(spoilerRegex, (match, inner) => {
-      const labelMatch = inner.match(/<span[^>]*class="[^"]*bbCodeSpoiler-button-title[^"]*"[^>]*>([\s\S]*?)<\/span>/i);
       let label = '';
+
+      // Try to find the label in the button title
+      const labelMatch = inner.match(/<span[^>]*class="[^"]*bbCodeSpoiler-button-title[^"]*"[^>]*>([\s\S]*?)<\/span>/i);
       if (labelMatch) {
         label = labelMatch[1].replace(/<[^>]+>/g, '').trim();
-      }
-      if (!label) {
+      } else {
+        // Fallback: try to find any button and extract text
         const btnMatch = inner.match(/<button[^>]*>([\s\S]*?)<\/button>/i);
         if (btnMatch) {
           label = btnMatch[1].replace(/<[^>]+>/g, '').trim();
@@ -424,9 +427,18 @@ class DefaultExtension extends MProvider {
         }
       }
 
-      const contentMatch = inner.match(/<div[^>]*class="[^"]*bbCodeSpoiler-content[^"]*"[^>]*>([\s\S]*?)<\/div>/i);
-      let content = contentMatch ? contentMatch[1] : inner;
+      // Try to find the content block
+      let content = '';
+      const contentMatch = inner.match(/<div[^>]*class="[^"]*bbCodeSpoiler-content[^"]*"[^>]*>([\s\S]*?)(?=<\/div>\s*<\/div>\s*<\/div>|$)/i);
+      if (contentMatch) {
+        content = contentMatch[1];
+      } else {
+        // If we can't find the specific content div, use the inner html
+        // but remove the button part to avoid duplication
+        content = inner.replace(/<button[\s\S]*?<\/button>/i, '');
+      }
 
+      // Try to unwrap an inner bbCodeBlock div if it exists
       const innerBlockMatch = content.match(/<div[^>]*class="[^"]*bbCodeBlock[^"]*"[^>]*>([\s\S]*?)<\/div>/i);
       if (innerBlockMatch) {
         content = innerBlockMatch[1];
