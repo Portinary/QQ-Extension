@@ -6,7 +6,7 @@ const mangayomiSources = [{
   "iconUrl": "https://forum.questionablequesting.com/favicon.ico",
   "typeSource": "single",
   "itemType": 2,
-  "version": "1.2.9.7",
+  "version": "1.2.9.8",
   "pkgPath": "",
   "notes": ""
 }];
@@ -379,6 +379,7 @@ class DefaultExtension extends MProvider {
     const absoluteUrl = this.normalizeChapterUrl(url);
     const client = new Client();
     
+    // 1. Fetch page and follow redirects
     let res = await client.get(absoluteUrl, this.getHeaders(absoluteUrl));
     let finalUrl = absoluteUrl;
 
@@ -392,35 +393,28 @@ class DefaultExtension extends MProvider {
 
     const doc = new Document(res.body);
 
-    // 1. Extract post ID from original URL, redirected URL, or URL anchor fragment (#post-XXXXX)
+    // 2. Extract post ID from original URL or redirected anchor fragment (#post-12366882)
     let postId = null;
-    const postMatch = absoluteUrl.match(/(?:post-|\/posts\/)(\d+)/) || finalUrl.match(/(?:post-|\/posts\/|#post-)(\d+)/);
+    const postMatch = absoluteUrl.match(/(?:post-|\/posts\/|#post-)(\d+)/) || finalUrl.match(/(?:post-|\/posts\/|#post-)(\d+)/);
     if (postMatch) {
       postId = postMatch[1];
     }
 
     let body = null;
 
-    // 2. Target the EXACT post by ID to avoid picking up reader comments
+    // 3. Target the specific post element (#post-12366882)
     if (postId) {
-      const targetPost = doc.selectFirst(`#post-${postId}, article[data-content="post-${postId}"], [id="js-post-${postId}"]`);
+      const targetPost = doc.selectFirst(`#post-${postId}`) || doc.selectFirst(`[data-content="post-${postId}"]`);
       if (targetPost) {
-        body = targetPost.selectFirst('.message-body .bbWrapper') || 
-               targetPost.selectFirst('.message-body') || 
-               targetPost.selectFirst('.bbWrapper');
+        // Direct match for the .bbWrapper container inside that article
+        body = targetPost.selectFirst('.bbWrapper') || targetPost.selectFirst('.message-body');
       }
     }
 
-    // 3. Fallback: If no post ID matched, target the original thread author's post (ignore viewer replies)
-    if (!body) {
-      const firstPost = doc.selectFirst('article.message--post, .js-post:first-child, .message:first-of-type');
-      if (firstPost) {
-        body = firstPost.selectFirst('.message-body .bbWrapper') || firstPost.selectFirst('.bbWrapper');
-      }
-    }
-
-    // 4. Final safety fallback
-    if (!body) body = doc.selectFirst('.message-body .bbWrapper') || doc.selectFirst('.bbWrapper');
+    // 4. General fallbacks for threadmarks/single posts
+    if (!body) body = doc.selectFirst('.message--post .bbWrapper');
+    if (!body) body = doc.selectFirst('.message-body .bbWrapper');
+    if (!body) body = doc.selectFirst('.bbWrapper');
 
     if (!body) {
       return '<html><body><p>Chapter content not found.</p></body></html>';
@@ -428,28 +422,6 @@ class DefaultExtension extends MProvider {
 
     const cleanedHtml = await this.cleanHtmlContent(body.outerHtml || '');
     return `<html><body>${cleanedHtml}</body></html>`;
-  }
-  
-  async cleanHtmlContent(html) {
-    if (!html) return '<p>Chapter content not found.</p>';
-    let cleaned = html;
-
-    // 1. Remove dangerous or non-rendering scripts/iframes
-    cleaned = cleaned.replace(/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi, '');
-    cleaned = cleaned.replace(/<noscript\b[^<]*(?:(?!<\/noscript>)<[^<]*)*<\/noscript>/gi, '');
-    cleaned = cleaned.replace(/<iframe\b[^<]*(?:(?!<\/iframe>)<[^<]*)*<\/iframe>/gi, '');
-
-    // 2. Process XenForo Spoilers & Attachments
-    cleaned = this.unwrapSpoilers(cleaned);
-    
-    // 3. Fix image sources (handles lazy loading, attachment paths, and relative URLs)
-    cleaned = this.fixImages(cleaned);
-
-    // 4. Strip leftover class and id attributes without destroying inner tags/images
-    cleaned = cleaned.replace(/\sclass=["'][^"']*["']/g, '');
-    cleaned = cleaned.replace(/\sid=["'][^"']*["']/g, '');
-
-    return cleaned;
   }
   
   unwrapSpoilers(html) {
