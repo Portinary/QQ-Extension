@@ -11,7 +11,7 @@
     "isNsfw": true,
     "hasCloudflare": true,
     "sourceCodeUrl": "https://raw.githubusercontent.com/Portinary/QQ-Extension/mangayomi/javascript/novel/src/en/questionablequesting.js",
-    "apiUrl": "",
+    "apiUrl": "https://forum.questionablequesting.com",
     "version": "1.0.6",
     "isManga": false,
     "itemType": 2,
