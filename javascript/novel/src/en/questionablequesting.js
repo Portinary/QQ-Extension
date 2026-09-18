@@ -6,7 +6,7 @@ const mangayomiSources = [{
   "iconUrl": "https://forum.questionablequesting.com/favicon.ico",
   "typeSource": "single",
   "itemType": 2,
-  "version": "1.2.1",
+  "version": "1.2.2",
   "pkgPath": "",
   "notes": ""
 }];
@@ -83,7 +83,22 @@ class DefaultExtension extends MProvider {
 
   async runSearch(url) {
     const client = new Client();
-    const res = await client.get(url, this.getHeaders(url));
+    let res = await client.get(url, this.getHeaders(url));
+
+    // Handle XenForo search redirect (303/302).
+    // XenForo responds to a search submission with a redirect to a
+    // temporary search ID URL. The Client does not follow redirects
+    // automatically, so we must fetch the Location header manually.
+    if (res.statusCode === 303 || res.statusCode === 302) {
+      const location = res.headers && (res.headers['location'] || res.headers['Location']);
+      if (location) {
+        const absoluteLocation = location.startsWith('http')
+          ? location
+          : SITE + location;
+        res = await client.get(absoluteLocation, this.getHeaders(absoluteLocation));
+      }
+    }
+
     const doc = new Document(res.body);
 
     const novels = [];
