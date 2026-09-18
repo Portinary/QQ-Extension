@@ -6,7 +6,7 @@ const mangayomiSources = [{
   "iconUrl": "https://forum.questionablequesting.com/favicon.ico",
   "typeSource": "single",
   "itemType": 2,
-  "version": "1.3.7",
+  "version": "1.3.8",
   "pkgPath": "",
   "notes": ""
 }];
@@ -341,7 +341,7 @@ class DefaultExtension extends MProvider {
 
     let processed = html;
 
-    // 1. Replace <img> tags with dual rendering (<p><img src="..." /></p> plus explicit fallback link)
+    // Convert XenForo attachment containers and inline images into clean standalone HTML tags
     processed = processed.replace(/<img([^>]*?)>/gi, (match, attrs) => {
       const dataUrlMatch = attrs.match(/data-url=["']([^"']+)["']/i);
       const dataSrcMatch = attrs.match(/data-src=["']([^"']+)["']/i);
@@ -360,11 +360,9 @@ class DefaultExtension extends MProvider {
         absolute = SITE + absolute;
       }
 
-      return `<p><img src="${absolute}" /></p><p><a href="${absolute}">[View Image]</a></p>`;
+      // Format directly as standard HTML paragraph image
+      return `</p><p><img src="${absolute}" alt="image" /></p><p>`;
     });
-
-    // 2. Clean up double nested <p> blocks
-    processed = processed.replace(/<p>\s*<p>/gi, '<p>').replace(/<\/p>\s*<\/p>/gi, '</p>');
 
     return processed;
   }
