@@ -6,7 +6,7 @@ const mangayomiSources = [{
   "iconUrl": "https://forum.questionablequesting.com/favicon.ico",
   "typeSource": "single",
   "itemType": 2,
-  "version": "1.0.7",
+  "version": "1.0.8",
   "pkgPath": "",
   "notes": ""
 }];
@@ -258,13 +258,18 @@ class DefaultExtension extends MProvider {
     const titleEl = doc.selectFirst('.p-title-value');
     let rawTitle = 'Untitled';
     if (titleEl) {
-      const removeEls = titleEl.select('.unreadLink, .labelLink, .label, .label-append');
-      for (const e of removeEls) {
-        e.remove();
-      }
-      rawTitle = titleEl.text.trim();
+      // Use string replacement instead of .remove() for cross-runtime safety
+      let titleHtml = titleEl.outerHtml || titleEl.text || '';
+      titleHtml = titleHtml.replace(/<span class="unreadLink[^>]*>.*?<\/span>/gi, '');
+      titleHtml = titleHtml.replace(/<span class="labelLink[^>]*>.*?<\/span>/gi, '');
+      titleHtml = titleHtml.replace(/<span class="label[^>]*>.*?<\/span>/gi, '');
+      titleHtml = titleHtml.replace(/<span class="label-append[^>]*>.*?<\/span>/gi, '');
+
+      // Extract text from the cleaned HTML
+      const tempDoc = new Document(titleHtml);
+      rawTitle = tempDoc.text.trim() || titleEl.text.trim();
     }
-    if (!rawTitle) {
+    if (!rawTitle || rawTitle === 'Untitled') {
       const ogTitle = doc.selectFirst('meta[property="og:title"]');
       if (ogTitle) rawTitle = ogTitle.attr('content') || 'Untitled';
     }
