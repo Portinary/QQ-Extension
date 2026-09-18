@@ -6,7 +6,7 @@ const mangayomiSources = [{
   "iconUrl": "https://forum.questionablequesting.com/favicon.ico",
   "typeSource": "single",
   "itemType": 2,
-  "version": "1.2.8",
+  "version": "1.2.9",
   "pkgPath": "",
   "notes": ""
 }];
@@ -30,7 +30,10 @@ class DefaultExtension extends MProvider {
   }
 
   stripTitlePrefix(title) {
-    return title.replace(/^\[(NSFW\vert{}Quest\vert{}CYOA)\]\s*/i, '').trim();
+    if (!title) return '';
+    return title
+      .replace(/^(?:\[\s*(?:NSFW\vert{}Quest\vert{}CYOA\vert{}SFW)\s*\]|\b(?:NSFW|Quest|CYOA|SFW)\b)\s*/i, '')
+      .trim();
   }
 
   normalizeThreadUrl(href) {
@@ -364,6 +367,10 @@ class DefaultExtension extends MProvider {
       status: 0,
       chapters: allChapters,
     };
+  }
+
+  async getPageList(url) {
+    return [{ url }];
   }
 
   async getHtmlContent(url) {
