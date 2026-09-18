@@ -169,55 +169,46 @@ class DefaultExtension extends MProvider {
     return { list: merged, hasNextPage: merged.length >= 20 };
   }
 
-  extractChapters(doc, prefix) {
-    const chapters = [];
+extractChapters(doc, prefix) {
+  const chapters = [];
+  // Support both structItem and direct threadmark list items
+  const items = doc.select('.structItem--threadmark, .threadmarkItem, .structItemContainer .structItem');
+  
+  for (const el of items) {
+    const classAttr = el.attr('class') || '';
+    if (classAttr.includes('structItem--threadmark-filler')) continue;
 
-    const items = doc.select('.structItemContainer .structItem--threadmark');
-    for (const el of items) {
-      const classAttr = el.attr('class') || '';
-      if (classAttr.includes('structItem--threadmark-filler')) continue;
+    const linkEl = el.selectFirst('.structItem-title a, .threadmark-title a, a[href*="/threads/"]');
+    if (!linkEl) continue;
 
-      const linkEl = el.selectFirst('.structItem-title a');
-      if (!linkEl) continue;
-      const rawHref = linkEl.attr('href');
-      if (!rawHref) continue;
+    const rawHref = linkEl.attr('href');
+    if (!rawHref) continue;
 
-      // Normalize the chapter URL to a clean /posts/ID/ form when possible.
-      const href = this.normalizeChapterUrl(rawHref);
+    const href = this.normalizeChapterUrl(rawHref);
+    const rawName = linkEl.text.trim();
+    if (!rawName) continue;
 
-      const rawName = linkEl.text.trim();
-      const name = prefix ? `${prefix} - ${rawName}` : rawName;
+    const name = prefix ? `${prefix} - ${rawName}` : rawName;
 
-      let dateUpload = null;
-      const timeEl = el.selectFirst('time.structItem-latestDate');
-
-      if (timeEl) {
-        const dataTime = timeEl.attr('data-time');
-        if (dataTime && /^\d+$/.test(dataTime)) {
-          dateUpload = (parseInt(dataTime, 10) * 1000).toString();
-        } else {
-          const dateStr = timeEl.attr('data-date-string');
-          if (dateStr) {
-            const parts = dateStr.split('/');
-            if (parts.length === 3) {
-              const d = parseInt(parts[0], 10);
-              const m = parseInt(parts[1], 10);
-              const y = parseInt(parts[2], 10);
-              if (!isNaN(d) && !isNaN(m) && !isNaN(y)) {
-                dateUpload = new Date(y, m - 1, d).getTime().toString();
-              }
-            }
-          }
-        }
+    // Parse timestamp
+    let dateUpload = null;
+    const timeEl = el.selectFirst('time');
+    if (timeEl) {
+      const dataTime = timeEl.attr('data-time');
+      if (dataTime && /^\d+$/.test(dataTime)) {
+        dateUpload = (parseInt(dataTime, 10) * 1000).toString();
       }
-
-      const chapter = { name, url: href };
-      if (dateUpload) chapter.dateUpload = dateUpload;
-      chapters.push(chapter);
     }
 
-    return chapters;
+    chapters.push({
+      name,
+      url: href,
+      ...(dateUpload && { dateUpload })
+    });
   }
+
+  return chapters;
+}
 
   countChaptersAndPages(doc) {
     let count = 0;
@@ -379,26 +370,29 @@ class DefaultExtension extends MProvider {
     };
   }
 
-  async getHtmlContent(name, url) {
-    const client = new Client();
-    const res = await client.get(url, this.getHeaders(url));
-    const doc = new Document(res.body);
+// Remove or throw error in getPageList for itemType: 2, 
+// or implement it as a fallback if Mangayomi expects it.
+async getPageList(url) {
+  return []; 
+}
 
-    // If the URL is /posts/ID/, the page contains only one post.
-    // Otherwise, fall back to the first .message-body.
-    let post = doc.selectFirst('.message-body');
-    if (!post) post = doc.selectFirst('.bbWrapper');
+// Ensure getHtmlContent returns valid, clean HTML with fully resolved image URLs
+async getHtmlContent(url) {
+  const client = new Client();
+  const res = await client.get(url, this.getHeaders(url));
+  const doc = new Document(res.body);
 
-    let body = post ? post.selectFirst('.bbWrapper') : null;
-    if (!body) body = doc.selectFirst('.bbWrapper');
+  let post = doc.selectFirst('.message-body');
+  if (!post) post = doc.selectFirst('.bbWrapper');
+  let body = post ? post.selectFirst('.bbWrapper') : doc.selectFirst('.bbWrapper');
 
-    if (!body) {
-      return '<html><body><p>Chapter content not found.</p></body></html>';
-    }
-
-    const cleanedHtml = await this.cleanHtmlContent(body.outerHtml || '');
-    return `<html><body>${cleanedHtml}</body></html>`;
+  if (!body) {
+    return '<html><body><p>Chapter content not found.</p></body></html>';
   }
+
+  const cleanedHtml = await this.cleanHtmlContent(body.outerHtml || '');
+  return `<html><body>${cleanedHtml}</body></html>`;
+}
 
   async cleanHtmlContent(html) {
     if (!html) return '<p>Chapter content not found.</p>';
@@ -489,38 +483,32 @@ class DefaultExtension extends MProvider {
   }
 
   fixImages(html) {
-    return html.replace(/<img([^>]*?)>/gi, (match, attrs) => {
-      const dataSrcMatch = attrs.match(/data-src=["']([^"']+)["']/i);
-      const dataUrlMatch = attrs.match(/data-url=["']([^"']+)["']/i);
-      const srcMatch = attrs.match(/\bsrc=["']([^"']+)["']/i);
+  return html.replace(/<img([^>]*?)>/gi, (match, attrs) => {
+    const dataSrcMatch = attrs.match(/data-src=["']([^"']+)["']/i);
+    const dataUrlMatch = attrs.match(/data-url=["']([^"']+)["']/i);
+    const srcMatch = attrs.match(/\bsrc=["']([^"']+)["']/i);
 
-      let realSrc = '';
-      if (dataSrcMatch) realSrc = dataSrcMatch[1];
-      else if (dataUrlMatch) realSrc = dataUrlMatch[1];
-      else if (srcMatch) realSrc = srcMatch[1];
+    let realSrc = '';
+    if (dataSrcMatch) realSrc = dataSrcMatch[1];
+    else if (dataUrlMatch) realSrc = dataUrlMatch[1];
+    else if (srcMatch) realSrc = srcMatch[1];
 
-      if (!realSrc) return match;
+    if (!realSrc || realSrc.startsWith('data:image')) return match;
 
-      let absolute = realSrc;
-      if (!absolute.startsWith('http')) {
-        absolute = absolute.startsWith('/') ? SITE + absolute : SITE + '/' + absolute;
+    let absolute = realSrc;
+    if (!absolute.startsWith('http://') && !absolute.startsWith('https://')) {
+      if (absolute.startsWith('/')) {
+        absolute = SITE + absolute;
+      } else {
+        absolute = SITE + '/' + absolute;
       }
+    }
 
-      let newAttrs = attrs
-        .replace(/data-src=["'][^"']*["']/gi, '')
-        .replace(/data-url=["'][^"']*["']/gi, '')
-        .replace(/class=["'][^"']*lazyload[^"']*["']/gi, '')
-        .replace(/\bsrc=["'][^"']*["']/gi, '');
-
-      return `<img${newAttrs} src="${absolute}">`;
-    });
-  }
+    return `<img src="${absolute}" style="max-width: 100%; height: auto;" />`;
+  });
+}
 
   async getVideoList(url) {
-    return [];
-  }
-
-  async getPageList(url) {
     return [];
   }
 
