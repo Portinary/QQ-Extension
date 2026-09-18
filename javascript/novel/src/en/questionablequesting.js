@@ -6,7 +6,7 @@ const mangayomiSources = [{
   "iconUrl": "https://forum.questionablequesting.com/favicon.ico",
   "typeSource": "single",
   "itemType": 2,
-  "version": "1.2.6",
+  "version": "1.2.7",
   "pkgPath": "",
   "notes": ""
 }];
