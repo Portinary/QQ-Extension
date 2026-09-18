@@ -7,7 +7,7 @@ const mangayomiSources = [{
   "typeSource": "single",
   "isManga": false,
   "itemType": 2,
-  "version": "1.0.4",
+  "version": "1.0.5",
   "dateFormat": "",
   "dateFormatLocale": "",
   "isNsfw": true,
@@ -18,7 +18,6 @@ const SITE = 'https://forum.questionablequesting.com';
 const NSFW_CREATIVE_WRITING_ID = 29;
 const PER_PAGE = 200;
 
-// Define headers as a global constant to avoid 'this' context issues
 const HEADERS = {
   'User-Agent': 'Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36'
 };
@@ -52,24 +51,25 @@ class DefaultExtension extends MProvider {
 
     const client = new Client();
     const res = await client.get(url, HEADERS);
-    const doc = new Document(res.body);
+    const doc = parseHtml(res.body);
 
     const novels = [];
-    doc.querySelectorAll('.structItem--thread').forEach((el) => {
-      if (el.querySelectorAll('.structItem-status--sticky').length > 0) return;
+    const threads = doc.select('.structItem--thread');
+    for (const el of threads) {
+      if (el.select('.structItem-status--sticky').length > 0) continue;
 
-      const linkEls = el.querySelectorAll('.structItem-title a');
-      if (linkEls.length === 0) return;
+      const linkEls = el.select('.structItem-title a');
+      if (linkEls.length === 0) continue;
       const linkEl = linkEls[linkEls.length - 1];
 
-      const rawHref = linkEl.getAttribute('href');
-      if (!rawHref) return;
+      const rawHref = linkEl.attr('href');
+      if (!rawHref) continue;
 
       const href = this.normalizeThreadUrl(rawHref);
 
-      const avatarImg = el.querySelectorAll('.structItem-cell--icon img')[0];
+      const avatarImg = el.select('.structItem-cell--icon img')[0];
       const src = avatarImg
-        ? (avatarImg.getAttribute('src') || avatarImg.getAttribute('data-src'))
+        ? (avatarImg.attr('src') || avatarImg.attr('data-src'))
         : '';
 
       novels.push({
@@ -77,7 +77,7 @@ class DefaultExtension extends MProvider {
         url: href,
         imageUrl: src ? this.upgradeAvatar(src) : '',
       });
-    });
+    }
 
     return { list: novels, hasNextPage: novels.length >= 20 };
   }
@@ -85,18 +85,19 @@ class DefaultExtension extends MProvider {
   async runSearch(url) {
     const client = new Client();
     const res = await client.get(url, HEADERS);
-    const doc = new Document(res.body);
+    const doc = parseHtml(res.body);
 
     const novels = [];
-    doc.querySelectorAll('.contentRow').forEach((el) => {
-      const linkEl = el.querySelectorAll('.contentRow-title a')[0];
-      if (!linkEl) return;
-      const href = linkEl.getAttribute('href');
-      if (!href) return;
+    const rows = doc.select('.contentRow');
+    for (const el of rows) {
+      const linkEl = el.select('.contentRow-title a')[0];
+      if (!linkEl) continue;
+      const href = linkEl.attr('href');
+      if (!href) continue;
 
-      const avatarImg = el.querySelectorAll('.contentRow-figure img')[0];
+      const avatarImg = el.select('.contentRow-figure img')[0];
       const src = avatarImg
-        ? (avatarImg.getAttribute('src') || avatarImg.getAttribute('data-src'))
+        ? (avatarImg.attr('src') || avatarImg.attr('data-src'))
         : '';
 
       novels.push({
@@ -104,7 +105,7 @@ class DefaultExtension extends MProvider {
         url: this.normalizeThreadUrl(href),
         imageUrl: src ? this.upgradeAvatar(src) : '',
       });
-    });
+    }
 
     return novels;
   }
@@ -146,26 +147,28 @@ class DefaultExtension extends MProvider {
   extractChapters(doc, prefix) {
     const chapters = [];
 
-    doc.querySelectorAll('.structItemContainer .structItem--threadmark').forEach((el) => {
-      if (el.classList.contains('structItem--threadmark-filler')) return;
+    const items = doc.select('.structItemContainer .structItem--threadmark');
+    for (const el of items) {
+      const classAttr = el.attr('class') || '';
+      if (classAttr.includes('structItem--threadmark-filler')) continue;
 
-      const linkEl = el.querySelectorAll('.structItem-title a')[0];
-      if (!linkEl) return;
-      const href = linkEl.getAttribute('href');
-      if (!href) return;
+      const linkEl = el.select('.structItem-title a')[0];
+      if (!linkEl) continue;
+      const href = linkEl.attr('href');
+      if (!href) continue;
 
       const rawName = linkEl.text.trim();
       const name = prefix ? `${prefix} - ${rawName}` : rawName;
 
       let dateUpload = null;
-      const timeEl = el.querySelectorAll('time.structItem-latestDate')[0];
+      const timeEl = el.select('time.structItem-latestDate')[0];
 
       if (timeEl) {
-        const dataTime = timeEl.getAttribute('data-time');
+        const dataTime = timeEl.attr('data-time');
         if (dataTime && /^\d+$/.test(dataTime)) {
           dateUpload = (parseInt(dataTime, 10) * 1000).toString();
         } else {
-          const dateStr = timeEl.getAttribute('data-date-string');
+          const dateStr = timeEl.attr('data-date-string');
           if (dateStr) {
             const parts = dateStr.split('/');
             if (parts.length === 3) {
@@ -183,21 +186,21 @@ class DefaultExtension extends MProvider {
       const chapter = { name, url: href };
       if (dateUpload) chapter.dateUpload = dateUpload;
       chapters.push(chapter);
-    });
+    }
 
     return chapters;
   }
 
   countChaptersAndPages(doc) {
     let count = 0;
-    const statsList = doc.querySelectorAll('.threadmarkListingHeader-stats dl.pairs');
-    statsList.forEach((el) => {
-      const dt = el.querySelectorAll('dt')[0];
+    const statsList = doc.select('.threadmarkListingHeader-stats dl.pairs');
+    for (const el of statsList) {
+      const dt = el.select('dt')[0];
       if (dt && dt.text.trim() === 'Threadmarks') {
-        const dd = el.querySelectorAll('dd')[0];
+        const dd = el.select('dd')[0];
         if (dd) count = parseInt(dd.text.replace(/,/g, '') || '0', 10);
       }
-    });
+    }
     return { count, pages: count > 0 ? Math.ceil(count / PER_PAGE) : 1 };
   }
 
@@ -205,7 +208,7 @@ class DefaultExtension extends MProvider {
     const client = new Client();
     const firstUrl = `${baseUrl}${baseUrl.includes('?') ? '&' : '?'}per_page=${PER_PAGE}`;
     const resFirst = await client.get(firstUrl, HEADERS);
-    const docFirst = new Document(resFirst.body);
+    const docFirst = parseHtml(resFirst.body);
 
     const { pages } = this.countChaptersAndPages(docFirst);
     let chapters = this.extractChapters(docFirst, prefix);
@@ -213,7 +216,7 @@ class DefaultExtension extends MProvider {
     for (let p = 2; p <= pages; p++) {
       const pageUrl = `${firstUrl}&page=${p}`;
       const resP = await client.get(pageUrl, HEADERS);
-      const docP = new Document(resP.body);
+      const docP = parseHtml(resP.body);
       chapters = chapters.concat(this.extractChapters(docP, prefix));
     }
 
@@ -251,52 +254,56 @@ class DefaultExtension extends MProvider {
     const client = new Client();
     const defaultUrl = `${SITE}/threads/${slug}/threadmarks`;
     const res = await client.get(`${defaultUrl}?per_page=${PER_PAGE}`, HEADERS);
-    const doc = new Document(res.body);
+    const doc = parseHtml(res.body);
 
-    const titleEl = doc.querySelectorAll('.p-title-value')[0];
+    const titleEl = doc.selectFirst('.p-title-value');
     let rawTitle = 'Untitled';
     if (titleEl) {
-      titleEl.querySelectorAll('.unreadLink, .labelLink, .label, .label-append').forEach((e) => e.remove());
+      const removeEls = titleEl.select('.unreadLink, .labelLink, .label, .label-append');
+      for (const e of removeEls) {
+        e.remove();
+      }
       rawTitle = titleEl.text.trim();
     }
     if (!rawTitle) {
-      const ogTitle = doc.querySelectorAll('meta[property="og:title"]')[0];
-      if (ogTitle) rawTitle = ogTitle.getAttribute('content') || 'Untitled';
+      const ogTitle = doc.selectFirst('meta[property="og:title"]');
+      if (ogTitle) rawTitle = ogTitle.attr('content') || 'Untitled';
     }
     const title = this.stripTitlePrefix(rawTitle);
 
-    const authorEl = doc.querySelectorAll('.username')[0];
+    const authorEl = doc.selectFirst('.username');
     const author = authorEl ? authorEl.text.trim() : 'Unknown';
 
     let description = '';
-    const headerDesc = doc.querySelectorAll('.threadmarkListingHeader-extraInfo .bbWrapper')[0];
+    const headerDesc = doc.selectFirst('.threadmarkListingHeader-extraInfo .bbWrapper');
     if (headerDesc) {
-      description = this.htmlToText(headerDesc.innerHTML || '').slice(0, 500);
+      description = this.htmlToText(headerDesc.outerHtml || '').slice(0, 500);
     }
 
     let imageUrl = '';
     const threadMainUrl = `${SITE}/threads/${slug}/`;
     try {
       const resThread = await client.get(threadMainUrl, HEADERS);
-      const docThread = new Document(resThread.body);
-      const avatarImg = docThread.querySelectorAll('img[class^="avatar-u"]')[0];
+      const docThread = parseHtml(resThread.body);
+      const avatarImg = docThread.selectFirst('img[class^="avatar-u"]');
       if (avatarImg) {
-        const src = avatarImg.getAttribute('src') || avatarImg.getAttribute('data-src');
+        const src = avatarImg.attr('src') || avatarImg.attr('data-src');
         if (src) imageUrl = this.upgradeAvatar(src);
       }
     } catch (_e) {}
 
     const categories = [];
-    doc.querySelectorAll('.block-tabHeader--threadmarkCategoryTabs a.tabs-tab').forEach((el) => {
-      const href = el.getAttribute('href');
+    const tabs = doc.select('.block-tabHeader--threadmarkCategoryTabs a.tabs-tab');
+    for (const el of tabs) {
+      const href = el.attr('href');
       const label = el.text.trim();
-      if (!href) return;
+      if (!href) continue;
 
       const fullUrl = href.startsWith('http') ? href : SITE + href;
       const isMain = !href.includes('threadmark_category=');
 
       categories.push({ label, url: fullUrl, isMain });
-    });
+    }
 
     if (categories.length === 0) {
       categories.push({ label: 'Threadmarks', url: defaultUrl, isMain: true });
