@@ -7,7 +7,7 @@ const mangayomiSources = [{
   "typeSource": "single",
   "isManga": false,
   "itemType": 2,
-  "version": "1.0.2",
+  "version": "1.0.3",
   "dateFormat": "",
   "dateFormatLocale": "",
   "isNsfw": true,
@@ -47,6 +47,15 @@ class DefaultExtension extends MProvider {
   }
 
   async getPopular(page) {
+    // --- DIAGNOSTIC BLOCK ---
+    if (typeof Client === 'undefined') {
+      throw new Error('getPopular DIAGNOSTIC: The global "Client" is undefined.');
+    }
+    if (typeof Document === 'undefined') {
+      throw new Error('getPopular DIAGNOSTIC: The global "Document" is undefined.');
+    }
+    // --- END DIAGNOSTIC BLOCK ---
+
     const safePage = page > 1 ? page : 1;
     const baseUrl = `${SITE}/forums/nsfw-creative-writing.${NSFW_CREATIVE_WRITING_ID}`;
     const url = safePage === 1 ? `${baseUrl}/` : `${baseUrl}/page-${safePage}`;
