@@ -6,7 +6,7 @@ const mangayomiSources = [{
   "iconUrl": "https://forum.questionablequesting.com/favicon.ico",
   "typeSource": "single",
   "itemType": 2,
-  "version": "1.2.9",
+  "version": "1.2.9.1",
   "pkgPath": "",
   "notes": ""
 }];
@@ -48,19 +48,21 @@ class DefaultExtension extends MProvider {
   }
 
   normalizeChapterUrl(href) {
-    if (!href) return href;
-
-    const postMatch = href.match(/(?:post-|\/posts\/)(\d+)/);
+    if (!href) return '';
+  
+    let cleanHref = href.trim();
+    const postMatch = cleanHref.match(/(?:post-|\/posts\/)(\d+)/);
     if (postMatch) {
       return `${SITE}/posts/${postMatch[1]}/`;
     }
 
-    if (!href.startsWith('http')) {
-      return SITE + (href.startsWith('/') ? href : '/' + href);
+    if (!cleanHref.startsWith('http://') && !cleanHref.startsWith('https://')) {
+      if (!cleanHref.startsWith('/')) cleanHref = '/' + cleanHref;
+      return SITE + cleanHref;
     }
-    return href;
+    return cleanHref;
   }
-
+  
   async getPopular(page) {
     const safePage = page > 1 ? page : 1;
     const baseUrl = `${SITE}/forums/nsfw-creative-writing.${NSFW_CREATIVE_WRITING_ID}`;
@@ -370,12 +372,15 @@ class DefaultExtension extends MProvider {
   }
 
   async getPageList(url) {
-    return [{ url }];
+    // Ensure absolute URL before sending to Mangayomi's client
+    const absoluteUrl = this.normalizeChapterUrl(url);
+    return [{ url: absoluteUrl }];
   }
 
   async getHtmlContent(url) {
+    const absoluteUrl = this.normalizeChapterUrl(url);
     const client = new Client();
-    const res = await client.get(url, this.getHeaders(url));
+    const res = await client.get(absoluteUrl, this.getHeaders(absoluteUrl));
     const doc = new Document(res.body);
 
     let post = doc.selectFirst('.message-body');
