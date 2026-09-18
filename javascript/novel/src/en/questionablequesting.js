@@ -6,7 +6,7 @@ const mangayomiSources = [{
   "iconUrl": "https://forum.questionablequesting.com/favicon.ico",
   "typeSource": "single",
   "itemType": 2,
-  "version": "1.2.7.1",
+  "version": "1.2.8",
   "pkgPath": "",
   "notes": ""
 }];
@@ -18,7 +18,8 @@ const PER_PAGE = 200;
 class DefaultExtension extends MProvider {
   getHeaders(url) {
     return {
-      'User-Agent': 'Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36'
+      'User-Agent': 'Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36',
+      'Referer': SITE
     };
   }
 
@@ -29,7 +30,7 @@ class DefaultExtension extends MProvider {
   }
 
   stripTitlePrefix(title) {
-    return title.replace(/^\[(NSFW|Quest|CYOA)\]\s*/i, '').trim();
+    return title.replace(/^\[(NSFW\vert{}Quest\vert{}CYOA)\]\s*/i, '').trim();
   }
 
   normalizeThreadUrl(href) {
@@ -46,14 +47,11 @@ class DefaultExtension extends MProvider {
   normalizeChapterUrl(href) {
     if (!href) return href;
 
-    // Match post-12345 or /posts/12345 anywhere in the URL
     const postMatch = href.match(/(?:post-|\/posts\/)(\d+)/);
     if (postMatch) {
       return `${SITE}/posts/${postMatch[1]}/`;
     }
 
-    // If it's a threadmark link without a post ID, return it as-is.
-    // getHtmlContent will fall back to the first .message-body.
     if (!href.startsWith('http')) {
       return SITE + (href.startsWith('/') ? href : '/' + href);
     }
@@ -171,9 +169,8 @@ class DefaultExtension extends MProvider {
 
   extractChapters(doc, prefix) {
     const chapters = [];
-    // Support both structItem and direct threadmark list items
     const items = doc.select('.structItem--threadmark, .threadmarkItem, .structItemContainer .structItem');
-  
+
     for (const el of items) {
       const classAttr = el.attr('class') || '';
       if (classAttr.includes('structItem--threadmark-filler')) continue;
@@ -190,7 +187,6 @@ class DefaultExtension extends MProvider {
 
       const name = prefix ? `${prefix} - ${rawName}` : rawName;
 
-      // Parse timestamp
       let dateUpload = null;
       const timeEl = el.selectFirst('time');
       if (timeEl) {
@@ -370,29 +366,22 @@ class DefaultExtension extends MProvider {
     };
   }
 
-// Remove or throw error in getPageList for itemType: 2, 
-// or implement it as a fallback if Mangayomi expects it.
-async getPageList(url) {
-  return []; 
-}
+  async getHtmlContent(url) {
+    const client = new Client();
+    const res = await client.get(url, this.getHeaders(url));
+    const doc = new Document(res.body);
 
-// Ensure getHtmlContent returns valid, clean HTML with fully resolved image URLs
-async getHtmlContent(url) {
-  const client = new Client();
-  const res = await client.get(url, this.getHeaders(url));
-  const doc = new Document(res.body);
+    let post = doc.selectFirst('.message-body');
+    if (!post) post = doc.selectFirst('.bbWrapper');
+    let body = post ? post.selectFirst('.bbWrapper') : doc.selectFirst('.bbWrapper');
 
-  let post = doc.selectFirst('.message-body');
-  if (!post) post = doc.selectFirst('.bbWrapper');
-  let body = post ? post.selectFirst('.bbWrapper') : doc.selectFirst('.bbWrapper');
+    if (!body) {
+      return '<html><body><p>Chapter content not found.</p></body></html>';
+    }
 
-  if (!body) {
-    return '<html><body><p>Chapter content not found.</p></body></html>';
+    const cleanedHtml = await this.cleanHtmlContent(body.outerHtml || '');
+    return `<html><body>${cleanedHtml}</body></html>`;
   }
-
-  const cleanedHtml = await this.cleanHtmlContent(body.outerHtml || '');
-  return `<html><body>${cleanedHtml}</body></html>`;
-}
 
   async cleanHtmlContent(html) {
     if (!html) return '<p>Chapter content not found.</p>';
@@ -407,7 +396,6 @@ async getHtmlContent(url) {
     cleaned = cleaned.replace(/<object\b[^<]*(?:(?!<\/object>)<[^<]*)*<\/object>/gi, '');
 
     cleaned = this.unwrapSpoilers(cleaned);
-
     cleaned = this.fixImages(cleaned);
 
     cleaned = cleaned.replace(/\sclass=["'][^"']*["']/g, '');
@@ -483,30 +471,30 @@ async getHtmlContent(url) {
   }
 
   fixImages(html) {
-  return html.replace(/<img([^>]*?)>/gi, (match, attrs) => {
-    const dataSrcMatch = attrs.match(/data-src=["']([^"']+)["']/i);
-    const dataUrlMatch = attrs.match(/data-url=["']([^"']+)["']/i);
-    const srcMatch = attrs.match(/\bsrc=["']([^"']+)["']/i);
+    return html.replace(/<img([^>]*?)>/gi, (match, attrs) => {
+      const dataSrcMatch = attrs.match(/data-src=["']([^"']+)["']/i);
+      const dataUrlMatch = attrs.match(/data-url=["']([^"']+)["']/i);
+      const srcMatch = attrs.match(/\bsrc=["']([^"']+)["']/i);
 
-    let realSrc = '';
-    if (dataSrcMatch) realSrc = dataSrcMatch[1];
-    else if (dataUrlMatch) realSrc = dataUrlMatch[1];
-    else if (srcMatch) realSrc = srcMatch[1];
+      let realSrc = '';
+      if (dataSrcMatch) realSrc = dataSrcMatch[1];
+      else if (dataUrlMatch) realSrc = dataUrlMatch[1];
+      else if (srcMatch) realSrc = srcMatch[1];
 
-    if (!realSrc || realSrc.startsWith('data:image')) return match;
+      if (!realSrc || realSrc.startsWith('data:image')) return match;
 
-    let absolute = realSrc;
-    if (!absolute.startsWith('http://') && !absolute.startsWith('https://')) {
-      if (absolute.startsWith('/')) {
-        absolute = SITE + absolute;
-      } else {
-        absolute = SITE + '/' + absolute;
+      let absolute = realSrc;
+      if (!absolute.startsWith('http://') && !absolute.startsWith('https://')) {
+        if (absolute.startsWith('/')) {
+          absolute = SITE + absolute;
+        } else {
+          absolute = SITE + '/' + absolute;
+        }
       }
-    }
 
-    return `<img src="${absolute}" style="max-width: 100%; height: auto;" />`;
-  });
-}
+      return `<img src="${absolute}" style="max-width: 100%; height: auto;" />`;
+    });
+  }
 
   async getVideoList(url) {
     return [];
