@@ -6,7 +6,7 @@ const mangayomiSources = [{
   "iconUrl": "https://forum.questionablequesting.com/favicon.ico",
   "typeSource": "single",
   "itemType": 2,
-  "version": "1.1.6",
+  "version": "1.1.7",
   "pkgPath": "",
   "notes": ""
 }];
@@ -112,10 +112,10 @@ class DefaultExtension extends MProvider {
   async search(query, page, filters) {
     const term = query.trim();
 
-    // XenForo 2.2+ uses q= for search term.
-    // c[title_only]=1 restricts to titles. o=date sorts by date.
+    // Legacy XenForo keywords= parameter, kept for compatibility with
+    // Mangayomi's Client. c[title_only]=1 restricts to titles.
     const searchUrl =
-      `${SITE}/search/search?q=${encodeURIComponent(term)}` +
+      `${SITE}/search/search?keywords=${encodeURIComponent(term)}` +
       `&c[title_only]=1&o=date&page=${page}`;
 
     const results = await this.runSearch(searchUrl);
