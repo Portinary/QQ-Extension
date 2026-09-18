@@ -6,7 +6,7 @@ const mangayomiSources = [{
   "iconUrl": "https://forum.questionablequesting.com/favicon.ico",
   "typeSource": "single",
   "itemType": 2,
-  "version": "1.3.6",
+  "version": "1.3.7",
   "pkgPath": "",
   "notes": ""
 }];
@@ -29,11 +29,10 @@ class DefaultExtension extends MProvider {
     return upgraded.startsWith('http') ? upgraded : SITE + upgraded;
   }
 
-  // Robust title cleaner matching Popular and Search views
   stripTitlePrefix(title) {
     if (!title) return '';
     return title
-      .replace(/<[^>]+>/g, '') // Strip inline HTML highlighting tags
+      .replace(/<[^>]+>/g, '')
       .replace(/^(?:\[\s*(?:NSFW\vert{}Quest\vert{}CYOA\vert{}SFW\vert{}Original\vert{}Fanfiction)\s*\]|\b(?:NSFW|Quest|CYOA|SFW)\b)\s*/i, '')
       .replace(/^\[[^\]]+\]\s*/, '')
       .trim();
@@ -268,7 +267,6 @@ class DefaultExtension extends MProvider {
       extraChapters.push(...catChapters);
     }
 
-    // Place Main chapters in reverse chronological order first, then append Extras at the bottom
     const sortedChapters = [...mainChapters.reverse(), ...extraChapters.reverse()];
 
     return {
@@ -341,8 +339,10 @@ class DefaultExtension extends MProvider {
   fixImages(html) {
     if (!html) return "";
 
-    // Step 1: Fix standard XenForo img tags (data-url / data-src / src)
-    let processed = html.replace(/<img([^>]*?)>/gi, (match, attrs) => {
+    let processed = html;
+
+    // 1. Replace <img> tags with dual rendering (<p><img src="..." /></p> plus explicit fallback link)
+    processed = processed.replace(/<img([^>]*?)>/gi, (match, attrs) => {
       const dataUrlMatch = attrs.match(/data-url=["']([^"']+)["']/i);
       const dataSrcMatch = attrs.match(/data-src=["']([^"']+)["']/i);
       const srcMatch = attrs.match(/\bsrc=["']([^"']+)["']/i);
@@ -360,22 +360,11 @@ class DefaultExtension extends MProvider {
         absolute = SITE + absolute;
       }
 
-      return `<img src="${absolute}" style="max-width:100%; height:auto;" />`;
+      return `<p><img src="${absolute}" /></p><p><a href="${absolute}">[View Image]</a></p>`;
     });
 
-    // Step 2: Convert lightbox attachment anchors to img tags safely
-    processed = processed.replace(/<a\b[^>]*\bhref=["']([^"']+)["'][^>]*>(?:\s*<img\b[^>]*>)?\s*<\/a>/gi, (match, href) => {
-      if (href.includes('/attachments/') || href.match(/\.(jpg|jpeg|png|gif|webp)(\?.*)?$/i)) {
-        const absolute = href.startsWith('http') ? href : SITE + (href.startsWith('/') ? href : '/' + href);
-        return `<p><img src="${absolute}" style="max-width:100%; height:auto;" /></p>`;
-      }
-      return match;
-    });
-
-    // Step 3: Replace standalone raw image URLs outside existing HTML tags
-    processed = processed.replace(/(>|^)(https?:\/\/[^\s<"']+\.(?:png|jpg|jpeg|gif|webp)(?:\?[^\s<"']*)?)(?=<|$)/gi, (match, prefix, url) => {
-      return `${prefix}<p><img src="${url}" style="max-width:100%; height:auto;" /></p>`;
-    });
+    // 2. Clean up double nested <p> blocks
+    processed = processed.replace(/<p>\s*<p>/gi, '<p>').replace(/<\/p>\s*<\/p>/gi, '</p>');
 
     return processed;
   }
