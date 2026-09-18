@@ -6,7 +6,7 @@ const mangayomiSources = [{
   "iconUrl": "https://forum.questionablequesting.com/favicon.ico",
   "typeSource": "single",
   "itemType": 2,
-  "version": "1.1.7",
+  "version": "1.1.8",
   "pkgPath": "",
   "notes": ""
 }];
@@ -112,10 +112,13 @@ class DefaultExtension extends MProvider {
   async search(query, page, filters) {
     const term = query.trim();
 
-    // Legacy XenForo keywords= parameter, kept for compatibility with
-    // Mangayomi's Client. c[title_only]=1 restricts to titles.
+    // Search restricted to the NSFW Creative Writing forum (node 29) and
+    // its child nodes. t=post enables post/thread search, and
+    // c[title_only]=1 limits results to thread titles.
     const searchUrl =
-      `${SITE}/search/search?keywords=${encodeURIComponent(term)}` +
+      `${SITE}/search/search?q=${encodeURIComponent(term)}` +
+      `&t=post&c[child_nodes]=1` +
+      `&c[nodes][0]=${NSFW_CREATIVE_WRITING_ID}` +
       `&c[title_only]=1&o=date&page=${page}`;
 
     const results = await this.runSearch(searchUrl);
