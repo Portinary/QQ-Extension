@@ -6,7 +6,7 @@ const mangayomiSources = [{
   "iconUrl": "https://forum.questionablequesting.com/favicon.ico",
   "typeSource": "single",
   "itemType": 2,
-  "version": "1.3.0",
+  "version": "1.3.1",
   "pkgPath": "",
   "notes": ""
 }];
@@ -49,7 +49,6 @@ class DefaultExtension extends MProvider {
 
   normalizeChapterUrl(href) {
     if (!href) return href;
-
     if (!href.startsWith('http')) {
       return SITE + (href.startsWith('/') ? href : '/' + href);
     }
@@ -77,17 +76,10 @@ class DefaultExtension extends MProvider {
       const rawHref = linkEl.attr('href');
       if (!rawHref) continue;
 
-      const href = this.normalizeThreadUrl(rawHref);
-
-      const avatarImg = el.selectFirst('.structItem-cell--icon img');
-      const src = avatarImg
-        ? (avatarImg.attr('src') || avatarImg.attr('data-src'))
-        : '';
-
       novels.push({
         name: this.stripTitlePrefix(linkEl.text.trim()),
-        link: href,
-        imageUrl: src ? this.upgradeAvatar(src) : '',
+        link: this.normalizeThreadUrl(rawHref),
+        imageUrl: (el.selectFirst('.structItem-cell--icon img') ? this.upgradeAvatar(el.selectFirst('.structItem-cell--icon img').attr('src') || el.selectFirst('.structItem-cell--icon img').attr('data-src')) : ''),
       });
     }
 
@@ -98,7 +90,7 @@ class DefaultExtension extends MProvider {
     const client = new Client();
     let res = await client.get(url, this.getHeaders(url));
 
-    if (res.statusCode === 303 || res.statusCode === 302 || res.statusCode === 301) {
+    if (res.statusCode >= 300 && res.statusCode < 400) {
       const location = res.headers && (res.headers['location'] || res.headers['Location']);
       if (location) {
         const absoluteLocation = location.startsWith('http') ? location : SITE + location;
@@ -107,7 +99,6 @@ class DefaultExtension extends MProvider {
     }
 
     const doc = new Document(res.body);
-
     const novels = [];
     const rows = doc.select('.contentRow');
     for (const el of rows) {
@@ -116,15 +107,10 @@ class DefaultExtension extends MProvider {
       const href = linkEl.attr('href');
       if (!href) continue;
 
-      const avatarImg = el.selectFirst('.contentRow-figure img');
-      const src = avatarImg
-        ? (avatarImg.attr('src') || avatarImg.attr('data-src'))
-        : '';
-
       novels.push({
         name: this.stripTitlePrefix(linkEl.text.trim()),
         link: this.normalizeThreadUrl(href),
-        imageUrl: src ? this.upgradeAvatar(src) : '',
+        imageUrl: (el.selectFirst('.contentRow-figure img') ? this.upgradeAvatar(el.selectFirst('.contentRow-figure img').attr('src') || el.selectFirst('.contentRow-figure img').attr('data-src')) : ''),
       });
     }
 
@@ -133,27 +119,17 @@ class DefaultExtension extends MProvider {
 
   async search(query, page, filters) {
     const term = query.trim();
-
-    const titleUrl =
-      `${SITE}/search/search?keywords=${encodeURIComponent(term)}` +
-      `&t=thread&c[title_only]=1&page=${page}`;
+    const titleUrl = `${SITE}/search/search?keywords=${encodeURIComponent(term)}&t=thread&c[title_only]=1&page=${page}`;
     const titleResults = await this.runSearch(titleUrl);
 
     let authorResults = [];
     if (page === 1) {
-      const authorUrl =
-        `${SITE}/search/search?users=${encodeURIComponent(term)}` +
-        `&user_content=thread`;
-      try {
-        authorResults = await this.runSearch(authorUrl);
-      } catch (_e) {
-        authorResults = [];
-      }
+      const authorUrl = `${SITE}/search/search?users=${encodeURIComponent(term)}&user_content=thread`;
+      try { authorResults = await this.runSearch(authorUrl); } catch (_e) {}
     }
 
     const seen = new Set();
     const merged = [];
-
     for (const n of [...titleResults, ...authorResults]) {
       if (!n.link || seen.has(n.link)) continue;
       seen.add(n.link);
@@ -168,8 +144,7 @@ class DefaultExtension extends MProvider {
     const items = doc.select('.structItem--threadmark, .threadmarkItem, .structItemContainer .structItem');
 
     for (const el of items) {
-      const classAttr = el.attr('class') || '';
-      if (classAttr.includes('structItem--threadmark-filler')) continue;
+      if ((el.attr('class') || '').includes('structItem--threadmark-filler')) continue;
 
       const linkEl = el.selectFirst('.structItem-title a, .threadmark-title a, a[href*="/threads/"], a[href*="/posts/"]');
       if (!linkEl) continue;
@@ -181,8 +156,6 @@ class DefaultExtension extends MProvider {
       const rawName = linkEl.text.trim();
       if (!rawName) continue;
 
-      const name = prefix ? `${prefix} - ${rawName}` : rawName;
-
       let dateUpload = null;
       const timeEl = el.selectFirst('time');
       if (timeEl) {
@@ -193,7 +166,7 @@ class DefaultExtension extends MProvider {
       }
 
       chapters.push({
-        name,
+        name: prefix ? `${prefix} - ${rawName}` : rawName,
         url: href,
         ...(dateUpload && { dateUpload })
       });
@@ -239,14 +212,8 @@ class DefaultExtension extends MProvider {
       .replace(/<\/p>/gi, '\n')
       .replace(/<br\s*\/?>/gi, '\n')
       .replace(/<\/div>/gi, '\n')
-      .replace(/<\/li>/gi, '\n')
       .replace(/<[^>]+>/g, '')
       .replace(/&nbsp;/g, ' ')
-      .replace(/&amp;/g, '&')
-      .replace(/&lt;/g, '<')
-      .replace(/&gt;/g, '>')
-      .replace(/&quot;/g, '"')
-      .replace(/&#39;/g, "'")
       .replace(/\n{3,}/g, '\n\n')
       .trim();
   }
@@ -258,7 +225,6 @@ class DefaultExtension extends MProvider {
       .replace(/\/threadmarks.*$/, '')
       .replace(/\/post-\d+.*$/, '')
       .replace(/\/unread.*$/, '')
-      .replace(/\/latest.*$/, '')
       .replace(/\?.*$/, '')
       .replace(/\/$/, '');
 
@@ -269,20 +235,7 @@ class DefaultExtension extends MProvider {
 
     const titleEl = doc.selectFirst('.p-title-value');
     let rawTitle = 'Untitled';
-    if (titleEl) {
-      let titleHtml = titleEl.outerHtml || titleEl.text || '';
-      titleHtml = titleHtml.replace(/<span class="unreadLink[^>]*>.*?<\/span>/gi, '');
-      titleHtml = titleHtml.replace(/<span class="labelLink[^>]*>.*?<\/span>/gi, '');
-      titleHtml = titleHtml.replace(/<span class="label[^>]*>.*?<\/span>/gi, '');
-      titleHtml = titleHtml.replace(/<span class="label-append[^>]*>.*?<\/span>/gi, '');
-
-      const tempDoc = new Document(titleHtml);
-      rawTitle = (tempDoc.text || '').trim() || (titleEl.text || '').trim();
-    }
-    if (!rawTitle || rawTitle === 'Untitled') {
-      const ogTitle = doc.selectFirst('meta[property="og:title"]');
-      if (ogTitle) rawTitle = ogTitle.attr('content') || 'Untitled';
-    }
+    if (titleEl) rawTitle = (titleEl.text || '').trim();
     const title = this.stripTitlePrefix(rawTitle);
 
     const authorEl = doc.selectFirst('.username');
@@ -294,29 +247,16 @@ class DefaultExtension extends MProvider {
       description = this.htmlToText(headerDesc.outerHtml || '').slice(0, 500);
     }
 
-    let imageUrl = '';
-    const threadMainUrl = `${SITE}/threads/${slug}/`;
-    try {
-      const resThread = await client.get(threadMainUrl, this.getHeaders(threadMainUrl));
-      const docThread = new Document(resThread.body);
-      const avatarImg = docThread.selectFirst('img[class^="avatar-u"]');
-      if (avatarImg) {
-        const src = avatarImg.attr('src') || avatarImg.attr('data-src');
-        if (src) imageUrl = this.upgradeAvatar(src);
-      }
-    } catch (_e) {}
-
     const categories = [];
     const tabs = doc.select('.block-tabHeader--threadmarkCategoryTabs a.tabs-tab');
     for (const el of tabs) {
       const href = el.attr('href');
-      const label = (el.text || '').trim();
       if (!href) continue;
-
-      const fullUrl = href.startsWith('http') ? href : SITE + href;
-      const isMain = !href.includes('threadmark_category=');
-
-      categories.push({ label, url: fullUrl, isMain });
+      categories.push({ 
+        label: (el.text || '').trim(), 
+        url: href.startsWith('http') ? href : SITE + href, 
+        isMain: !href.includes('threadmark_category=') 
+      });
     }
 
     if (categories.length === 0) {
@@ -329,52 +269,32 @@ class DefaultExtension extends MProvider {
     const extras = [];
     for (const cat of categories) {
       if (cat.isMain) continue;
-      const catChapters = await this.fetchCategory(cat.url, cat.label);
-      extras.push(...catChapters);
+      extras.push(...(await this.fetchCategory(cat.url, cat.label)));
     }
-
-    const sortByDate = (a, b) => {
-      const da = a.dateUpload ? parseInt(a.dateUpload, 10) : 0;
-      const db = b.dateUpload ? parseInt(b.dateUpload, 10) : 0;
-      return da - db;
-    };
-
-    const sortedMain = mainChapters
-      .map((ch, i) => ({ ch, i }))
-      .sort((a, b) => sortByDate(a.ch, b.ch) || a.i - b.i)
-      .map(x => x.ch);
-
-    const sortedExtras = extras
-      .map((ch, i) => ({ ch, i }))
-      .sort((a, b) => sortByDate(a.ch, b.ch) || a.i - b.i)
-      .map(x => x.ch);
-
-    const allChapters = [...sortedMain.reverse(), ...sortedExtras.reverse()];
 
     return {
       name: title,
       link: url,
-      imageUrl,
+      imageUrl: '',
       description,
       author,
       status: 0,
-      chapters: allChapters,
+      chapters: [...mainChapters.reverse(), ...extras.reverse()],
     };
   }
 
   async getPageList(url) {
-    const absoluteUrl = this.normalizeChapterUrl(url);
-    return [{ url: absoluteUrl }];
+    return [{ url: this.normalizeChapterUrl(url) }];
   }
 
   async getHtmlContent(name, url) {
     const absoluteUrl = this.normalizeChapterUrl(url);
     const client = new Client();
 
-    // 1. Resolve redirect chain manually up to 3 deep
     let currentUrl = absoluteUrl;
     let res = await client.get(currentUrl, this.getHeaders(currentUrl));
-    
+
+    // Follow redirect chain up to 3 times
     let redirectCount = 0;
     while ((res.statusCode >= 300 && res.statusCode < 400) && redirectCount < 3) {
       const location = res.headers && (res.headers['location'] || res.headers['Location']);
@@ -386,29 +306,25 @@ class DefaultExtension extends MProvider {
 
     const doc = new Document(res.body);
 
-    // 2. Extract Post ID from URL or anchor fragment
+    // Parse target Post ID from absolute URL or redirect response URL
     let postId = null;
     const postMatch = absoluteUrl.match(/(?:post-|\/posts\/|#post-)(\d+)/) || currentUrl.match(/(?:post-|\/posts\/|#post-)(\d+)/);
-    if (postMatch) {
-      postId = postMatch[1];
-    }
+    if (postMatch) postId = postMatch[1];
 
     let body = null;
 
-    // 3. Robust XenForo post target checking
     if (postId) {
       const targetArticle = 
         doc.selectFirst(`#post-${postId}`) || 
         doc.selectFirst(`#js-post-${postId}`) || 
         doc.selectFirst(`[data-content="post-${postId}"]`) ||
-        doc.selectFirst(`article[data-author][id*="${postId}"]`);
+        doc.selectFirst(`article[id*="${postId}"]`);
 
       if (targetArticle) {
         body = targetArticle.selectFirst('.bbWrapper') || targetArticle.selectFirst('.message-body');
       }
     }
 
-    // 4. Fallback selectors
     if (!body) body = doc.selectFirst('.message--post .bbWrapper');
     if (!body) body = doc.selectFirst('.message-body .bbWrapper');
     if (!body) body = doc.selectFirst('.bbWrapper');
@@ -426,19 +342,15 @@ class DefaultExtension extends MProvider {
     
     let cleaned = html;
 
-    // Remove script and iframe elements
     cleaned = cleaned.replace(/<(script|noscript|iframe|video|audio|object|embed)\b[^<]*(?:(?!<\/\1>)<[^<]*)*<\/\1>/gi, '');
 
-    // Transform XenForo spoilers safely without recursive loop bugs
+    // Unwrap XenForo spoilers safely without recursion loops
     cleaned = cleaned.replace(/<div[^>]*class="[^"]*bbCodeSpoiler[^"]*"[^>]*>[\s\S]*?<button[^>]*>([\s\S]*?)<\/button>[\s\S]*?<div[^>]*class="[^"]*bbCodeSpoiler-content[^"]*"[^>]*>([\s\S]*?)<\/div>\s*<\/div>/gi, (match, button, content) => {
       const title = button.replace(/<[^>]+>/g, '').trim() || 'Spoiler';
       return `<div style="margin: 10px 0; padding: 8px; border: 1px solid #ccc; background: #f9f9f9;"><p><strong>[${title}]</strong></p>${content}</div>`;
     });
 
-    // Fix images
-    cleaned = this.fixImages(cleaned);
-
-    return cleaned;
+    return this.fixImages(cleaned);
   }
 
   fixImages(html) {
@@ -464,15 +376,7 @@ class DefaultExtension extends MProvider {
     });
   }
 
-  async getVideoList(url) {
-    return [];
-  }
-
-  getFilterList() {
-    return [];
-  }
-
-  getSourcePreferences() {
-    return [];
-  }
+  async getVideoList(url) { return []; }
+  getFilterList() { return []; }
+  getSourcePreferences() { return []; }
 }
