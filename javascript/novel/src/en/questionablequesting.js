@@ -6,7 +6,7 @@ const mangayomiSources = [{
   "iconUrl": "https://forum.questionablequesting.com/favicon.ico",
   "typeSource": "single",
   "itemType": 2,
-  "version": "1.0.9",
+  "version": "1.1.0",
   "pkgPath": "",
   "notes": ""
 }];
@@ -361,6 +361,7 @@ class DefaultExtension extends MProvider {
     if (!html) return '<p>Chapter content not found.</p>';
     let cleaned = html;
 
+    // Remove dangerous elements
     cleaned = cleaned.replace(/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi, '');
     cleaned = cleaned.replace(/<noscript\b[^<]*(?:(?!<\/noscript>)<[^<]*)*<\/noscript>/gi, '');
     cleaned = cleaned.replace(/<iframe\b[^<]*(?:(?!<\/iframe>)<[^<]*)*<\/iframe>/gi, '');
@@ -369,34 +370,101 @@ class DefaultExtension extends MProvider {
     cleaned = cleaned.replace(/<embed\b[^>]*>/gi, '');
     cleaned = cleaned.replace(/<object\b[^<]*(?:(?!<\/object>)<[^<]*)*<\/object>/gi, '');
 
-    cleaned = cleaned.replace(/<img([^>]*?)src=["']([^"']+)["']([^>]*?)>/gi, (match, before, src, after) => {
-      let absolute = src;
-      if (src && !src.startsWith('http')) {
-        absolute = src.startsWith('/') ? SITE + src : SITE + '/' + src;
-      }
-      return `<img${before}src="${absolute}"${after}>`;
-    });
+    // Unwrap spoilers: turn them into inline content with a bold label
+    // Handles nested spoilers by processing innermost first
+    let spoilerChanged = true;
+    let passes = 0;
+    while (spoilerChanged && passes < 5) {
+      const before = cleaned;
+      cleaned = this.unwrapSpoilers(cleaned);
+      spoilerChanged = before !== cleaned;
+      passes++;
+    }
 
-    cleaned = cleaned.replace(/<img([^>]*?)data-src=["']([^"']+)["']([^>]*?)>/gi, (match, before, src, after) => {
-      let absolute = src;
-      if (src && !src.startsWith('http')) {
-        absolute = src.startsWith('/') ? SITE + src : SITE + '/' + src;
-      }
-      return `<img${before}src="${absolute}"${after}>`;
-    });
+    // Fix lazy-loaded images
+    cleaned = this.fixImages(cleaned);
 
-    cleaned = cleaned.replace(/<img([^>]*?)data-url=["']([^"']+)["']([^>]*?)>/gi, (match, before, src, after) => {
-      let absolute = src;
-      if (src && !src.startsWith('http')) {
-        absolute = src.startsWith('/') ? SITE + src : SITE + '/' + src;
-      }
-      return `<img${before}src="${absolute}"${after}>`;
-    });
-
+    // Remove remaining classes and IDs
     cleaned = cleaned.replace(/\sclass=["'][^"']*["']/g, '');
     cleaned = cleaned.replace(/\sid=["'][^"']*["']/g, '');
 
     return cleaned;
+  }
+
+  unwrapSpoilers(html) {
+    // Match a bbCodeSpoiler block. QQ's structure:
+    // <div class="bbCodeSpoiler">
+    //   <button class="bbCodeSpoiler-button ...">
+    //     <span class="bbCodeSpoiler-button-title">Label</span>
+    //   </button>
+    //   <div class="bbCodeSpoiler-content">
+    //     <div class="bbCodeBlock bbCodeBlock--expandable">...content...</div>
+    //   </div>
+    // </div>
+    const spoilerRegex = /<div[^>]*class="[^"]*bbCodeSpoiler[^"]*"[^>]*>([\s\S]*?)<\/div>\s*<\/div>\s*<\/div>/gi;
+
+    return html.replace(spoilerRegex, (match, inner) => {
+      // Extract label from the button title
+      const labelMatch = inner.match(/<span[^>]*class="[^"]*bbCodeSpoiler-button-title[^"]*"[^>]*>([\s\S]*?)<\/span>/i);
+      let label = '';
+      if (labelMatch) {
+        label = labelMatch[1].replace(/<[^>]+>/g, '').trim();
+      }
+      if (!label) {
+        const btnMatch = inner.match(/<button[^>]*>([\s\S]*?)<\/button>/i);
+        if (btnMatch) {
+          label = btnMatch[1].replace(/<[^>]+>/g, '').trim();
+          label = label.replace(/^Spoiler:\s*/i, '');
+        }
+      }
+
+      // Extract the content block
+      const contentMatch = inner.match(/<div[^>]*class="[^"]*bbCodeSpoiler-content[^"]*"[^>]*>([\s\S]*?)<\/div>/i);
+      let content = contentMatch ? contentMatch[1] : inner;
+
+      // If content is wrapped in another div, unwrap it
+      const innerBlockMatch = content.match(/<div[^>]*class="[^"]*bbCodeBlock[^"]*"[^>]*>([\s\S]*?)<\/div>/i);
+      if (innerBlockMatch) {
+        content = innerBlockMatch[1];
+      }
+
+      const heading = label
+        ? `<p><strong>[Spoiler: ${label}]</strong></p>`
+        : `<p><strong>[Spoiler]</strong></p>`;
+
+      return heading + content;
+    });
+  }
+
+  fixImages(html) {
+    return html.replace(/<img([^>]*?)>/gi, (match, attrs) => {
+      // Extract the best available source
+      const dataSrcMatch = attrs.match(/data-src=["']([^"']+)["']/i);
+      const dataUrlMatch = attrs.match(/data-url=["']([^"']+)["']/i);
+      const srcMatch = attrs.match(/\bsrc=["']([^"']+)["']/i);
+
+      let realSrc = '';
+      if (dataSrcMatch) realSrc = dataSrcMatch[1];
+      else if (dataUrlMatch) realSrc = dataUrlMatch[1];
+      else if (srcMatch) realSrc = srcMatch[1];
+
+      if (!realSrc) return match;
+
+      // Make absolute
+      let absolute = realSrc;
+      if (!absolute.startsWith('http')) {
+        absolute = absolute.startsWith('/') ? SITE + absolute : SITE + '/' + absolute;
+      }
+
+      // Remove data-src, data-url, lazyload class, and the old src
+      let newAttrs = attrs
+        .replace(/data-src=["'][^"']*["']/gi, '')
+        .replace(/data-url=["'][^"']*["']/gi, '')
+        .replace(/class=["'][^"']*lazyload[^"']*["']/gi, '')
+        .replace(/\bsrc=["'][^"']*["']/gi, '');
+
+      return `<img${newAttrs} src="${absolute}">`;
+    });
   }
 
   async getVideoList(url) {
