@@ -6,7 +6,7 @@ const mangayomiSources = [{
   "iconUrl": "https://forum.questionablequesting.com/favicon.ico",
   "typeSource": "single",
   "itemType": 2,
-  "version": "1.2.3",
+  "version": "1.2.4",
   "pkgPath": "",
   "notes": ""
 }];
@@ -41,6 +41,13 @@ class DefaultExtension extends MProvider {
     h = h.replace(/\?.*$/, '');
     if (!h.endsWith('/')) h += '/';
     return h;
+  }
+
+  extractPostId(url) {
+    if (!url) return null;
+    // Matches both #post-12345 and /post-12345
+    const match = url.match(/(?:#|\/)post-(\d+)/);
+    return match ? match[1] : null;
   }
 
   async getPopular(page) {
@@ -85,10 +92,6 @@ class DefaultExtension extends MProvider {
     const client = new Client();
     let res = await client.get(url, this.getHeaders(url));
 
-    // Handle XenForo search redirect (303/302).
-    // XenForo responds to a search submission with a redirect to a
-    // temporary search ID URL. The Client does not follow redirects
-    // automatically, so we must fetch the Location header manually.
     if (res.statusCode === 303 || res.statusCode === 302) {
       const location = res.headers && (res.headers['location'] || res.headers['Location']);
       if (location) {
@@ -127,14 +130,11 @@ class DefaultExtension extends MProvider {
   async search(query, page, filters) {
     const term = query.trim();
 
-    // Primary: title-only search using keywords= and c[title_only]=1.
     const titleUrl =
       `${SITE}/search/search?keywords=${encodeURIComponent(term)}` +
       `&t=thread&c[title_only]=1&page=${page}`;
     const titleResults = await this.runSearch(titleUrl);
 
-    // Secondary: author search, only on page 1 to avoid duplicate pagination.
-    // Matches threads where the username matches the query.
     let authorResults = [];
     if (page === 1) {
       const authorUrl =
@@ -147,7 +147,6 @@ class DefaultExtension extends MProvider {
       }
     }
 
-    // Merge results, deduplicating by link.
     const seen = new Set();
     const merged = [];
 
@@ -338,7 +337,6 @@ class DefaultExtension extends MProvider {
       extras.push(...catChapters);
     }
 
-    // Sort chapters by dateUpload, with stable ordering for ties.
     const sortByDate = (a, b) => {
       const da = a.dateUpload ? parseInt(a.dateUpload, 10) : 0;
       const db = b.dateUpload ? parseInt(b.dateUpload, 10) : 0;
@@ -355,7 +353,6 @@ class DefaultExtension extends MProvider {
       .sort((a, b) => sortByDate(a.ch, b.ch) || a.i - b.i)
       .map(x => x.ch);
 
-    // Reverse both so the newest is first (Mangayomi reader convention).
     const allChapters = [...sortedMain.reverse(), ...sortedExtras.reverse()];
 
     return {
@@ -371,30 +368,44 @@ class DefaultExtension extends MProvider {
 
   async getHtmlContent(name, url) {
     const client = new Client();
-    const res = await client.get(url, this.getHeaders(url));
+
+    // Extract the post ID from the chapter URL. Threadmark links often have
+    // the format /threads/slug.12345/page-84#post-12823334 or /post-12345.
+    const postId = this.extractPostId(url);
+
+    // Prefer the single-post URL, which returns only one post's HTML.
+    // This is much cleaner than fetching an entire thread page.
+    let fetchUrl = url;
+    if (postId) {
+      fetchUrl = `${SITE}/posts/${postId}/`;
+    }
+
+    const res = await client.get(fetchUrl, this.getHeaders(fetchUrl));
     const doc = new Document(res.body);
 
-    const postMatch = url.match(/post-(\d+)/);
-    const postId = postMatch ? postMatch[1] : null;
-
-    let post = postId ? doc.selectFirst(`#js-post-${postId}`) : null;
+    let post = null;
+    if (postId) {
+      post = doc.selectFirst(`#js-post-${postId}`);
+    }
     if (!post) post = doc.selectFirst('.message-body');
 
     let body = post ? post.selectFirst('.bbWrapper') : null;
     if (!body) body = doc.selectFirst('.bbWrapper');
 
     if (!body) {
-      return '<p>Chapter content not found.</p>';
+      return '<html><body><p>Chapter content not found.</p></body></html>';
     }
 
-    return this.cleanHtmlContent(body.outerHtml || '');
+    const cleanedHtml = this.cleanHtmlContent(body.outerHtml || '');
+
+    // Wrap in a minimal HTML document so the reader can parse it.
+    return `<html><body>${cleanedHtml}</body></html>`;
   }
 
   async cleanHtmlContent(html) {
     if (!html) return '<p>Chapter content not found.</p>';
     let cleaned = html;
 
-    // Remove dangerous elements
     cleaned = cleaned.replace(/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi, '');
     cleaned = cleaned.replace(/<noscript\b[^<]*(?:(?!<\/noscript>)<[^<]*)*<\/noscript>/gi, '');
     cleaned = cleaned.replace(/<iframe\b[^<]*(?:(?!<\/iframe>)<[^<]*)*<\/iframe>/gi, '');
@@ -403,13 +414,10 @@ class DefaultExtension extends MProvider {
     cleaned = cleaned.replace(/<embed\b[^>]*>/gi, '');
     cleaned = cleaned.replace(/<object\b[^<]*(?:(?!<\/object>)<[^<]*)*<\/object>/gi, '');
 
-    // Unwrap spoilers using index-based string manipulation
     cleaned = this.unwrapSpoilers(cleaned);
 
-    // Fix lazy-loaded images
     cleaned = this.fixImages(cleaned);
 
-    // Remove remaining classes and IDs
     cleaned = cleaned.replace(/\sclass=["'][^"']*["']/g, '');
     cleaned = cleaned.replace(/\sid=["'][^"']*["']/g, '');
 
@@ -420,19 +428,15 @@ class DefaultExtension extends MProvider {
     let result = html;
     let safety = 0;
 
-    // Find spoiler blocks and replace them with their content
     while (result.includes('bbCodeSpoiler') && safety < 20) {
       safety++;
 
-      // Find the start of a spoiler
       const startIdx = result.indexOf('bbCodeSpoiler');
       if (startIdx === -1) break;
 
-      // Find the start of the div containing this class
       let divStart = result.lastIndexOf('<div', startIdx);
       if (divStart === -1) break;
 
-      // Find the label (button title)
       const labelStart = result.indexOf('bbCodeSpoiler-button-title', divStart);
       let label = '';
       if (labelStart !== -1) {
@@ -443,13 +447,11 @@ class DefaultExtension extends MProvider {
         }
       }
 
-      // Find the content div
       const contentStart = result.indexOf('bbCodeSpoiler-content', divStart);
       if (contentStart === -1) break;
 
       const contentDivOpen = result.indexOf('>', contentStart) + 1;
 
-      // Find the matching closing div for the content
       let depth = 1;
       let pos = contentDivOpen;
       while (depth > 0 && pos < result.length) {
@@ -469,7 +471,6 @@ class DefaultExtension extends MProvider {
       const contentEnd = pos - 6;
       let content = result.substring(contentDivOpen, contentEnd);
 
-      // Strip the inner bbCodeBlock wrapper if present
       const blockStart = content.indexOf('bbCodeBlock');
       if (blockStart !== -1) {
         const blockDivOpen = content.indexOf('>', blockStart) + 1;
@@ -483,7 +484,6 @@ class DefaultExtension extends MProvider {
         ? `<p><strong>[Spoiler: ${label}]</strong></p>`
         : `<p><strong>[Spoiler]</strong></p>`;
 
-      // Replace the entire spoiler block
       result = result.substring(0, divStart) + heading + content + result.substring(pos);
     }
 
