@@ -6,7 +6,7 @@ const mangayomiSources = [{
   "iconUrl": "https://forum.questionablequesting.com/favicon.ico",
   "typeSource": "single",
   "itemType": 2,
-  "version": "1.2.5",
+  "version": "1.2.6",
   "pkgPath": "",
   "notes": ""
 }];
@@ -43,10 +43,21 @@ class DefaultExtension extends MProvider {
     return h;
   }
 
-  extractPostId(url) {
-    if (!url) return null;
-    const match = url.match(/(?:#|\/)post-(\d+)/);
-    return match ? match[1] : null;
+  normalizeChapterUrl(href) {
+    if (!href) return href;
+
+    // Match post-12345 or /posts/12345 anywhere in the URL
+    const postMatch = href.match(/(?:post-|\/posts\/)(\d+)/);
+    if (postMatch) {
+      return `${SITE}/posts/${postMatch[1]}/`;
+    }
+
+    // If it's a threadmark link without a post ID, return it as-is.
+    // getHtmlContent will fall back to the first .message-body.
+    if (!href.startsWith('http')) {
+      return SITE + (href.startsWith('/') ? href : '/' + href);
+    }
+    return href;
   }
 
   async getPopular(page) {
@@ -168,8 +179,11 @@ class DefaultExtension extends MProvider {
 
       const linkEl = el.selectFirst('.structItem-title a');
       if (!linkEl) continue;
-      const href = linkEl.attr('href');
-      if (!href) continue;
+      const rawHref = linkEl.attr('href');
+      if (!rawHref) continue;
+
+      // Normalize the chapter URL to a clean /posts/ID/ form when possible.
+      const href = this.normalizeChapterUrl(rawHref);
 
       const rawName = linkEl.text.trim();
       const name = prefix ? `${prefix} - ${rawName}` : rawName;
@@ -367,22 +381,13 @@ class DefaultExtension extends MProvider {
 
   async getHtmlContent(name, url) {
     const client = new Client();
-
-    const postId = this.extractPostId(url);
-
-    let fetchUrl = url;
-    if (postId) {
-      fetchUrl = `${SITE}/posts/${postId}/`;
-    }
-
-    const res = await client.get(fetchUrl, this.getHeaders(fetchUrl));
+    const res = await client.get(url, this.getHeaders(url));
     const doc = new Document(res.body);
 
-    let post = null;
-    if (postId) {
-      post = doc.selectFirst(`#js-post-${postId}`);
-    }
-    if (!post) post = doc.selectFirst('.message-body');
+    // If the URL is /posts/ID/, the page contains only one post.
+    // Otherwise, fall back to the first .message-body.
+    let post = doc.selectFirst('.message-body');
+    if (!post) post = doc.selectFirst('.bbWrapper');
 
     let body = post ? post.selectFirst('.bbWrapper') : null;
     if (!body) body = doc.selectFirst('.bbWrapper');
@@ -391,11 +396,7 @@ class DefaultExtension extends MProvider {
       return '<html><body><p>Chapter content not found.</p></body></html>';
     }
 
-    // IMPORTANT: await the async cleanHtmlContent call.
-    // Without await, this returns a Promise, which gets stringified
-    // into the reader as [object Promise].
     const cleanedHtml = await this.cleanHtmlContent(body.outerHtml || '');
-
     return `<html><body>${cleanedHtml}</body></html>`;
   }
 
