@@ -6,7 +6,7 @@ const mangayomiSources = [{
   "iconUrl": "https://forum.questionablequesting.com/favicon.ico",
   "typeSource": "single",
   "itemType": 2,
-  "version": "1.1.0",
+  "version": "1.1.1",
   "pkgPath": "",
   "notes": ""
 }];
@@ -321,9 +321,26 @@ class DefaultExtension extends MProvider {
       extras.push(...catChapters);
     }
 
-    // Reverse only the main chapters so the reader starts at chapter 1.
-    // Extras keep their original order.
-    const allChapters = [...mainChapters.reverse(), ...extras];
+    // Sort chapters by dateUpload, with stable ordering for ties.
+    // This normalizes both ascending and descending threadmark orders.
+    const sortByDate = (a, b) => {
+      const da = a.dateUpload ? parseInt(a.dateUpload, 10) : 0;
+      const db = b.dateUpload ? parseInt(b.dateUpload, 10) : 0;
+      return da - db;
+    };
+
+    const sortedMain = mainChapters
+      .map((ch, i) => ({ ch, i }))
+      .sort((a, b) => sortByDate(a.ch, b.ch) || a.i - b.i)
+      .map(x => x.ch);
+
+    const sortedExtras = extras
+      .map((ch, i) => ({ ch, i }))
+      .sort((a, b) => sortByDate(a.ch, b.ch) || a.i - b.i)
+      .map(x => x.ch);
+
+    // Reverse both so the newest is first (Mangayomi reader convention).
+    const allChapters = [...sortedMain.reverse(), ...sortedExtras.reverse()];
 
     return {
       name: title,
@@ -370,8 +387,7 @@ class DefaultExtension extends MProvider {
     cleaned = cleaned.replace(/<embed\b[^>]*>/gi, '');
     cleaned = cleaned.replace(/<object\b[^<]*(?:(?!<\/object>)<[^<]*)*<\/object>/gi, '');
 
-    // Unwrap spoilers: turn them into inline content with a bold label
-    // Handles nested spoilers by processing innermost first
+    // Unwrap spoilers (multi-pass for nested spoilers)
     let spoilerChanged = true;
     let passes = 0;
     while (spoilerChanged && passes < 5) {
@@ -392,19 +408,9 @@ class DefaultExtension extends MProvider {
   }
 
   unwrapSpoilers(html) {
-    // Match a bbCodeSpoiler block. QQ's structure:
-    // <div class="bbCodeSpoiler">
-    //   <button class="bbCodeSpoiler-button ...">
-    //     <span class="bbCodeSpoiler-button-title">Label</span>
-    //   </button>
-    //   <div class="bbCodeSpoiler-content">
-    //     <div class="bbCodeBlock bbCodeBlock--expandable">...content...</div>
-    //   </div>
-    // </div>
     const spoilerRegex = /<div[^>]*class="[^"]*bbCodeSpoiler[^"]*"[^>]*>([\s\S]*?)<\/div>\s*<\/div>\s*<\/div>/gi;
 
     return html.replace(spoilerRegex, (match, inner) => {
-      // Extract label from the button title
       const labelMatch = inner.match(/<span[^>]*class="[^"]*bbCodeSpoiler-button-title[^"]*"[^>]*>([\s\S]*?)<\/span>/i);
       let label = '';
       if (labelMatch) {
@@ -418,11 +424,9 @@ class DefaultExtension extends MProvider {
         }
       }
 
-      // Extract the content block
       const contentMatch = inner.match(/<div[^>]*class="[^"]*bbCodeSpoiler-content[^"]*"[^>]*>([\s\S]*?)<\/div>/i);
       let content = contentMatch ? contentMatch[1] : inner;
 
-      // If content is wrapped in another div, unwrap it
       const innerBlockMatch = content.match(/<div[^>]*class="[^"]*bbCodeBlock[^"]*"[^>]*>([\s\S]*?)<\/div>/i);
       if (innerBlockMatch) {
         content = innerBlockMatch[1];
@@ -438,7 +442,6 @@ class DefaultExtension extends MProvider {
 
   fixImages(html) {
     return html.replace(/<img([^>]*?)>/gi, (match, attrs) => {
-      // Extract the best available source
       const dataSrcMatch = attrs.match(/data-src=["']([^"']+)["']/i);
       const dataUrlMatch = attrs.match(/data-url=["']([^"']+)["']/i);
       const srcMatch = attrs.match(/\bsrc=["']([^"']+)["']/i);
@@ -450,13 +453,11 @@ class DefaultExtension extends MProvider {
 
       if (!realSrc) return match;
 
-      // Make absolute
       let absolute = realSrc;
       if (!absolute.startsWith('http')) {
         absolute = absolute.startsWith('/') ? SITE + absolute : SITE + '/' + absolute;
       }
 
-      // Remove data-src, data-url, lazyload class, and the old src
       let newAttrs = attrs
         .replace(/data-src=["'][^"']*["']/gi, '')
         .replace(/data-url=["'][^"']*["']/gi, '')
