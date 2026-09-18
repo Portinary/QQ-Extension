@@ -6,7 +6,7 @@ const mangayomiSources = [{
   "iconUrl": "https://forum.questionablequesting.com/favicon.ico",
   "typeSource": "single",
   "itemType": 2,
-  "version": "1.2.9.3",
+  "version": "1.2.9.4",
   "pkgPath": "",
   "notes": ""
 }];
@@ -432,23 +432,24 @@ class DefaultExtension extends MProvider {
     if (!html) return '<p>Chapter content not found.</p>';
     let cleaned = html;
 
+    // 1. Remove dangerous or non-rendering scripts/iframes
     cleaned = cleaned.replace(/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi, '');
     cleaned = cleaned.replace(/<noscript\b[^<]*(?:(?!<\/noscript>)<[^<]*)*<\/noscript>/gi, '');
     cleaned = cleaned.replace(/<iframe\b[^<]*(?:(?!<\/iframe>)<[^<]*)*<\/iframe>/gi, '');
-    cleaned = cleaned.replace(/<video\b[^<]*(?:(?!<\/video>)<[^<]*)*<\/video>/gi, '');
-    cleaned = cleaned.replace(/<audio\b[^<]*(?:(?!<\/audio>)<[^<]*)*<\/audio>/gi, '');
-    cleaned = cleaned.replace(/<embed\b[^>]*>/gi, '');
-    cleaned = cleaned.replace(/<object\b[^<]*(?:(?!<\/object>)<[^<]*)*<\/object>/gi, '');
 
+    // 2. Process XenForo Spoilers & Attachments
     cleaned = this.unwrapSpoilers(cleaned);
+    
+    // 3. Fix image sources (handles lazy loading, attachment paths, and relative URLs)
     cleaned = this.fixImages(cleaned);
 
+    // 4. Strip leftover class and id attributes without destroying inner tags/images
     cleaned = cleaned.replace(/\sclass=["'][^"']*["']/g, '');
     cleaned = cleaned.replace(/\sid=["'][^"']*["']/g, '');
 
     return cleaned;
   }
-
+  
   unwrapSpoilers(html) {
     let result = html;
     let safety = 0;
@@ -517,27 +518,26 @@ class DefaultExtension extends MProvider {
 
   fixImages(html) {
     return html.replace(/<img([^>]*?)>/gi, (match, attrs) => {
+      // XenForo image tags use data-url, data-src, or src for attachments
       const dataSrcMatch = attrs.match(/data-src=["']([^"']+)["']/i);
       const dataUrlMatch = attrs.match(/data-url=["']([^"']+)["']/i);
       const srcMatch = attrs.match(/\bsrc=["']([^"']+)["']/i);
 
       let realSrc = '';
-      if (dataSrcMatch) realSrc = dataSrcMatch[1];
-      else if (dataUrlMatch) realSrc = dataUrlMatch[1];
-      else if (srcMatch) realSrc = srcMatch[1];
+      if (dataSrcMatch && !dataSrcMatch[1].startsWith('data:')) realSrc = dataSrcMatch[1];
+      else if (dataUrlMatch && !dataUrlMatch[1].startsWith('data:')) realSrc = dataUrlMatch[1];
+      else if (srcMatch && !srcMatch[1].startsWith('data:')) realSrc = srcMatch[1];
 
-      if (!realSrc || realSrc.startsWith('data:image')) return match;
+      if (!realSrc) return match;
 
-      let absolute = realSrc;
+      // Ensure full absolute URL
+      let absolute = realSrc.trim();
       if (!absolute.startsWith('http://') && !absolute.startsWith('https://')) {
-        if (absolute.startsWith('/')) {
-          absolute = SITE + absolute;
-        } else {
-          absolute = SITE + '/' + absolute;
-        }
+        if (!absolute.startsWith('/')) absolute = '/' + absolute;
+        absolute = SITE + absolute;
       }
 
-      return `<img src="${absolute}" style="max-width: 100%; height: auto;" />`;
+      return `<img src="${absolute}" style="max-width:100%; height:auto; display:block; margin: 10px auto;" />`;
     });
   }
 
