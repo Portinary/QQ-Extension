@@ -6,7 +6,7 @@ const mangayomiSources = [{
   "iconUrl": "https://forum.questionablequesting.com/favicon.ico",
   "typeSource": "single",
   "itemType": 2,
-  "version": "1.2.9.4",
+  "version": "1.2.9.5",
   "pkgPath": "",
   "notes": ""
 }];
@@ -381,7 +381,7 @@ class DefaultExtension extends MProvider {
     const absoluteUrl = this.normalizeChapterUrl(url);
     const client = new Client();
     
-    // 1. Fetch initial URL and handle XenForo redirects
+    // 1. Fetch URL with redirect support
     let res = await client.get(absoluteUrl, this.getHeaders(absoluteUrl));
     let finalUrl = absoluteUrl;
 
@@ -394,34 +394,46 @@ class DefaultExtension extends MProvider {
     }
 
     const doc = new Document(res.body);
-    let body = null;
 
-    // 2. Extract post ID from original URL or redirected fragment/path
+    // 2. Extract post ID from original or redirected URL
     let postId = null;
     const postMatch = absoluteUrl.match(/\/posts\/(\d+)/) || finalUrl.match(/#post-(\d+)/) || finalUrl.match(/\/posts\/(\d+)/);
     if (postMatch) {
       postId = postMatch[1];
     }
 
-    // 3. Target specific post if ID is present
+    let body = null;
+
+    // 3. Try finding specific post container first
     if (postId) {
-      const targetPost = doc.selectFirst(`#post-${postId}, article[data-content="post-${postId}"], [data-author][id*="${postId}"]`);
+      const targetPost = doc.selectFirst(`#post-${postId}, article[data-content="post-${postId}"], .message[data-content="post-${postId}"]`);
       if (targetPost) {
         body = targetPost.selectFirst('.message-body .bbWrapper') || 
                targetPost.selectFirst('.message-body') || 
-               targetPost.selectFirst('.bbWrapper');
+               targetPost.selectFirst('.message-content');
       }
     }
 
-    // 4. General fallbacks for single-post thread pages or standard XenForo containers
-    if (!body) body = doc.selectFirst('.message-inner .message-body .bbWrapper');
+    // 4. Fallback across general XenForo post selectors
     if (!body) body = doc.selectFirst('.message-body .bbWrapper');
     if (!body) body = doc.selectFirst('.message-body');
-    if (!body) body = doc.selectFirst('article.message .bbWrapper');
+    if (!body) body = doc.selectFirst('.message-content .bbWrapper');
+    if (!body) body = doc.selectFirst('.message-content');
     if (!body) body = doc.selectFirst('.bbWrapper');
+    if (!body) body = doc.selectFirst('article.message-body');
+
+    // 5. Emergency fallback: collect all standalone images or paragraphs if post container parsing fails
+    if (!body) {
+      const imgElements = doc.select('.message-inner img, article img, .bbImageContainer img');
+      if (imgElements && imgElements.length > 0) {
+        let imgsHtml = imgElements.map(img => img.outerHtml).join('<br/>');
+        const cleanedHtml = await this.cleanHtmlContent(imgsHtml);
+        return `<html><body>${cleanedHtml}</body></html>`;
+      }
+    }
 
     if (!body) {
-      return '<html><body><p>Chapter content not found.</p></body></html>';
+      return '<html><body><p>Chapter content not found (Page access blocked or post structure altered).</p></body></html>';
     }
 
     const cleanedHtml = await this.cleanHtmlContent(body.outerHtml || '');
