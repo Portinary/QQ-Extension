@@ -19,9 +19,7 @@ class DefaultExtension extends MProvider {
   getHeaders(url) {
     return {
       'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
-      'Referer': SITE,
-      'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
-      'Accept-Language': 'en-US,en;q=0.5'
+      'Referer': SITE
     };
   }
 
@@ -281,8 +279,8 @@ class DefaultExtension extends MProvider {
     let targetUrl = url.startsWith('http') ? url : SITE + (url.startsWith('/') ? url : '/' + url);
 
     let res = await client.get(targetUrl, this.getHeaders(targetUrl));
-    
-    // Follow redirect if XenForo redirects post permalink to page anchor
+
+    // Follow redirect if XenForo redirects post permalink to thread page
     let redirectCount = 0;
     while ((res.statusCode >= 300 && res.statusCode < 400) && redirectCount < 3) {
       const location = res.headers && (res.headers['location'] || res.headers['Location']);
@@ -294,14 +292,13 @@ class DefaultExtension extends MProvider {
 
     const doc = new Document(res.body);
 
-    // Parse target post ID from URL (e.g., /post-12366882 or #post-12366882)
+    // Extract post ID from original or redirected URL (e.g., post-12366882)
     const postMatch = url.match(/post-(\d+)/) || targetUrl.match(/post-(\d+)/);
     const postId = postMatch ? postMatch[1] : null;
 
     let body = null;
 
     if (postId) {
-      // Find element matching post ID container
       const targetArticle = 
         doc.selectFirst(`article#js-post-${postId}`) || 
         doc.selectFirst(`article#post-${postId}`) || 
@@ -313,7 +310,7 @@ class DefaultExtension extends MProvider {
       }
     }
 
-    // Fallback selectors for threadmark landed single posts or page-1 thread posts
+    // Fallbacks if post ID selection isn't reached directly
     if (!body) body = doc.selectFirst('.message-inner .bbWrapper');
     if (!body) body = doc.selectFirst('article.message .bbWrapper');
     if (!body) body = doc.selectFirst('.message-body .bbWrapper');
