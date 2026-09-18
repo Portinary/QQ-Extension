@@ -6,7 +6,7 @@ const mangayomiSources = [{
   "iconUrl": "https://forum.questionablequesting.com/favicon.ico",
   "typeSource": "single",
   "itemType": 2,
-  "version": "1.1.9",
+  "version": "1.2.0",
   "pkgPath": "",
   "notes": ""
 }];
@@ -112,13 +112,14 @@ class DefaultExtension extends MProvider {
   async search(query, page, filters) {
     const term = query.trim();
 
-    // keywords= is the legacy XenForo parameter that actually returns results.
-    // Node constraints from the browser URL narrow it to the NSFW forum.
+    // keywords= is the legacy XenForo parameter that returns results.
+    // Node constraints narrow to NSFW Creative Writing forum.
+    // Title-only filter removed for testing.
     const searchUrl =
       `${SITE}/search/search?keywords=${encodeURIComponent(term)}` +
       `&t=post&c[child_nodes]=1` +
       `&c[nodes][0]=${NSFW_CREATIVE_WRITING_ID}` +
-      `&c[title_only]=1&o=date&page=${page}`;
+      `&o=date&page=${page}`;
 
     const results = await this.runSearch(searchUrl);
     return { list: results, hasNextPage: results.length >= 20 };
