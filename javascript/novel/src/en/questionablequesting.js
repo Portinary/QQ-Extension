@@ -6,7 +6,7 @@ const mangayomiSources = [{
   "iconUrl": "https://forum.questionablequesting.com/favicon.ico",
   "typeSource": "single",
   "itemType": 2,
-  "version": "1.1.2",
+  "version": "1.1.3",
   "pkgPath": "",
   "notes": ""
 }];
@@ -111,9 +111,10 @@ class DefaultExtension extends MProvider {
 
   async search(query, page, filters) {
     const term = query.trim();
+    // Adjusted search URL: removed c[title_only]=1 which was breaking results
     const titleUrl =
       `${SITE}/search/search?keywords=${encodeURIComponent(term)}` +
-      `&t=thread&c[title_only]=1&page=${page}`;
+      `&t=thread&page=${page}`;
     const titleResults = await this.runSearch(titleUrl);
 
     const isSingleWord = !term.includes(' ') && term.length > 0;
@@ -322,7 +323,6 @@ class DefaultExtension extends MProvider {
     }
 
     // Sort chapters by dateUpload, with stable ordering for ties.
-    // This normalizes both ascending and descending threadmark orders.
     const sortByDate = (a, b) => {
       const da = a.dateUpload ? parseInt(a.dateUpload, 10) : 0;
       const db = b.dateUpload ? parseInt(b.dateUpload, 10) : 0;
@@ -387,15 +387,8 @@ class DefaultExtension extends MProvider {
     cleaned = cleaned.replace(/<embed\b[^>]*>/gi, '');
     cleaned = cleaned.replace(/<object\b[^<]*(?:(?!<\/object>)<[^<]*)*<\/object>/gi, '');
 
-    // Unwrap spoilers (multi-pass for nested spoilers)
-    let spoilerChanged = true;
-    let passes = 0;
-    while (spoilerChanged && passes < 5) {
-      const before = cleaned;
-      cleaned = this.unwrapSpoilers(cleaned);
-      spoilerChanged = before !== cleaned;
-      passes++;
-    }
+    // Unwrap spoilers using index-based string manipulation
+    cleaned = this.unwrapSpoilers(cleaned);
 
     // Fix lazy-loaded images
     cleaned = this.fixImages(cleaned);
@@ -408,48 +401,77 @@ class DefaultExtension extends MProvider {
   }
 
   unwrapSpoilers(html) {
-    // More tolerant regex that handles variations in the closing structure.
-    const spoilerRegex = /<div[^>]*class="[^"]*bbCodeSpoiler[^"]*"[^>]*>([\s\S]*?)(?=<div[^>]*class="[^"]*bbCodeSpoiler[^"]*"|<\/div>\s*<\/div>\s*<\/div>|$)/gi;
+    let result = html;
+    let safety = 0;
 
-    return html.replace(spoilerRegex, (match, inner) => {
+    // Find spoiler blocks and replace them with their content
+    while (result.includes('bbCodeSpoiler') && safety < 20) {
+      safety++;
+
+      // Find the start of a spoiler
+      const startIdx = result.indexOf('bbCodeSpoiler');
+      if (startIdx === -1) break;
+
+      // Find the start of the div containing this class
+      let divStart = result.lastIndexOf('<div', startIdx);
+      if (divStart === -1) break;
+
+      // Find the label (button title)
+      const labelStart = result.indexOf('bbCodeSpoiler-button-title', divStart);
       let label = '';
-
-      // Try to find the label in the button title
-      const labelMatch = inner.match(/<span[^>]*class="[^"]*bbCodeSpoiler-button-title[^"]*"[^>]*>([\s\S]*?)<\/span>/i);
-      if (labelMatch) {
-        label = labelMatch[1].replace(/<[^>]+>/g, '').trim();
-      } else {
-        // Fallback: try to find any button and extract text
-        const btnMatch = inner.match(/<button[^>]*>([\s\S]*?)<\/button>/i);
-        if (btnMatch) {
-          label = btnMatch[1].replace(/<[^>]+>/g, '').trim();
-          label = label.replace(/^Spoiler:\s*/i, '');
+      if (labelStart !== -1) {
+        const labelOpen = result.indexOf('>', labelStart) + 1;
+        const labelClose = result.indexOf('</span>', labelOpen);
+        if (labelClose !== -1) {
+          label = result.substring(labelOpen, labelClose).replace(/<[^>]+>/g, '').trim();
         }
       }
 
-      // Try to find the content block
-      let content = '';
-      const contentMatch = inner.match(/<div[^>]*class="[^"]*bbCodeSpoiler-content[^"]*"[^>]*>([\s\S]*?)(?=<\/div>\s*<\/div>\s*<\/div>|$)/i);
-      if (contentMatch) {
-        content = contentMatch[1];
-      } else {
-        // If we can't find the specific content div, use the inner html
-        // but remove the button part to avoid duplication
-        content = inner.replace(/<button[\s\S]*?<\/button>/i, '');
+      // Find the content div
+      const contentStart = result.indexOf('bbCodeSpoiler-content', divStart);
+      if (contentStart === -1) break;
+
+      const contentDivOpen = result.indexOf('>', contentStart) + 1;
+
+      // Find the matching closing div for the content
+      let depth = 1;
+      let pos = contentDivOpen;
+      while (depth > 0 && pos < result.length) {
+        const nextOpen = result.indexOf('<div', pos);
+        const nextClose = result.indexOf('</div>', pos);
+
+        if (nextClose === -1) break;
+        if (nextOpen !== -1 && nextOpen < nextClose) {
+          depth++;
+          pos = nextOpen + 4;
+        } else {
+          depth--;
+          pos = nextClose + 6;
+        }
       }
 
-      // Try to unwrap an inner bbCodeBlock div if it exists
-      const innerBlockMatch = content.match(/<div[^>]*class="[^"]*bbCodeBlock[^"]*"[^>]*>([\s\S]*?)<\/div>/i);
-      if (innerBlockMatch) {
-        content = innerBlockMatch[1];
+      const contentEnd = pos - 6;
+      let content = result.substring(contentDivOpen, contentEnd);
+
+      // Strip the inner bbCodeBlock wrapper if present
+      const blockStart = content.indexOf('bbCodeBlock');
+      if (blockStart !== -1) {
+        const blockDivOpen = content.indexOf('>', blockStart) + 1;
+        const blockDivClose = content.lastIndexOf('</div>');
+        if (blockDivClose > blockDivOpen) {
+          content = content.substring(blockDivOpen, blockDivClose);
+        }
       }
 
       const heading = label
         ? `<p><strong>[Spoiler: ${label}]</strong></p>`
         : `<p><strong>[Spoiler]</strong></p>`;
 
-      return heading + content;
-    });
+      // Replace the entire spoiler block
+      result = result.substring(0, divStart) + heading + content + result.substring(pos);
+    }
+
+    return result;
   }
 
   fixImages(html) {
