@@ -6,8 +6,8 @@ const mangayomiSources = [{
   "iconUrl": "https://forum.questionablequesting.com/favicon.ico",
   "typeSource": "single",
   "isManga": false,
-  "itemType": 0,
-  "version": "1.0.1",
+  "itemType": 2,
+  "version": "1.0.2",
   "dateFormat": "",
   "dateFormatLocale": "",
   "isNsfw": true,
@@ -324,68 +324,11 @@ class DefaultExtension extends MProvider {
   }
 
   async getPageList(url) {
-    const client = new Client();
-    const res = await client.get(url, this.getHeaders(url));
-    const doc = new Document(res.body);
-
-    const postMatch = url.match(/post-(\d+)/);
-    const postId = postMatch ? postMatch[1] : null;
-
-    let post = postId ? doc.querySelectorAll(`#js-post-${postId}`)[0] : null;
-    if (!post) post = doc.querySelectorAll('.message-body')[0];
-
-    let body = post ? post.querySelectorAll('.bbWrapper')[0] : null;
-    if (!body) body = doc.querySelectorAll('.bbWrapper')[0];
-
-    if (!body) {
-      return ['<p>Chapter content not found.</p>'];
-    }
-
-    body.querySelectorAll('script, noscript, iframe, video, audio, embed, object').forEach((e) => e.remove());
-
-    body.querySelectorAll('img').forEach((img) => {
-      const realSrc = img.getAttribute('data-src') || img.getAttribute('data-url') || img.getAttribute('src');
-      if (realSrc) {
-        const absolute = realSrc.startsWith('http')
-          ? realSrc
-          : realSrc.startsWith('/')
-            ? SITE + realSrc
-            : SITE + '/' + realSrc;
-        img.setAttribute('src', absolute);
-        img.removeAttribute('data-src');
-        img.removeAttribute('data-url');
-        img.classList.remove('lazyload');
-      }
-    });
-
-    body.querySelectorAll('.bbCodeSpoiler').forEach((spoiler) => {
-      const button = spoiler.querySelectorAll('.bbCodeSpoiler-button')[0];
-      const label = button ? button.text.trim().replace(/^Spoiler:\s*/i, '') : '';
-      const content = spoiler.querySelectorAll('.bbCodeSpoiler-content')[0];
-
-      if (!content) {
-        spoiler.remove();
-        return;
-      }
-
-      content.querySelectorAll('script, noscript, iframe, video, audio, embed, object').forEach((e) => e.remove());
-
-      const heading = label
-        ? `<p><strong>[Spoiler: ${label}]</strong></p>`
-        : `<p><strong>[Spoiler]</strong></p>`;
-
-      spoiler.outerHTML = heading + content.innerHTML;
-    });
-
-    body.querySelectorAll('.bbCodeBlock-expandLink, .bbCodeBlock-shrinkLink').forEach((e) => e.remove());
-    body.querySelectorAll('button').forEach((e) => e.remove());
-
-    body.querySelectorAll('img').forEach((img) => {
-      const src = img.getAttribute('src');
-      if (src && src.startsWith('/')) img.setAttribute('src', SITE + src);
-    });
-
-    return [body.innerHTML || '<p>Chapter content not found.</p>'];
+    // For novel sources, Mangayomi expects getPageList to return an array of
+    // URLs that are used by the reader. Since QQ chapters are forum posts
+    // rather than image galleries, we return the chapter URL itself as a
+    // single "page". The reader will open it as a web page.
+    return [url];
   }
 
   getFilterList() {
