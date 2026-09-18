@@ -6,7 +6,7 @@ const mangayomiSources = [{
   "iconUrl": "https://forum.questionablequesting.com/favicon.ico",
   "typeSource": "single",
   "itemType": 2,
-  "version": "1.2.9.8",
+  "version": "1.2.9.9",
   "pkgPath": "",
   "notes": ""
 }];
@@ -422,6 +422,26 @@ class DefaultExtension extends MProvider {
 
     const cleanedHtml = await this.cleanHtmlContent(body.outerHtml || '');
     return `<html><body>${cleanedHtml}</body></html>`;
+  }
+
+  async cleanHtmlContent(html) {
+    if (!html) return '<p>Chapter content not found.</p>';
+    
+    let cleaned = html;
+
+    // 1. Remove scripts and media tags that break rendering
+    cleaned = cleaned.replace(/<(script|noscript|iframe|video|audio|object|embed)\b[^<]*(?:(?!<\/\1>)<[^<]*)*<\/\1>/gi, '');
+
+    // 2. Expand spoilers
+    cleaned = this.unwrapSpoilers(cleaned);
+
+    // 3. Fix image sources (handles lazy-loading and relative URLs)
+    cleaned = this.fixImages(cleaned);
+
+    // 4. Clean up unnecessary attributes without destroying tags
+    cleaned = cleaned.replace(/\s(class|id)=["'][^"']*["']/gi, '');
+
+    return cleaned;
   }
   
   unwrapSpoilers(html) {
