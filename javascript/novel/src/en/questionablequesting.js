@@ -6,7 +6,7 @@ const mangayomiSources = [{
   "iconUrl": "https://forum.questionablequesting.com/favicon.ico",
   "typeSource": "single",
   "itemType": 2,
-  "version": "1.2.9.1",
+  "version": "1.2.9.2",
   "pkgPath": "",
   "notes": ""
 }];
@@ -383,9 +383,23 @@ class DefaultExtension extends MProvider {
     const res = await client.get(absoluteUrl, this.getHeaders(absoluteUrl));
     const doc = new Document(res.body);
 
-    let post = doc.selectFirst('.message-body');
-    if (!post) post = doc.selectFirst('.bbWrapper');
-    let body = post ? post.selectFirst('.bbWrapper') : doc.selectFirst('.bbWrapper');
+    let body = null;
+
+    // 1. If the URL points directly to a specific post ID (e.g., /posts/12345/)
+    const postMatch = absoluteUrl.match(/\/posts\/(\d+)/);
+    if (postMatch) {
+      const postId = postMatch[1];
+      const targetPost = doc.selectFirst(`#post-${postId}, article[data-content="post-${postId}"]`);
+      if (targetPost) {
+        body = targetPost.selectFirst('.message-body, .bbWrapper');
+      }
+    }
+
+    // 2. Fallbacks for standard post containers on thread/post pages
+    if (!body) body = doc.selectFirst('.message-body .bbWrapper');
+    if (!body) body = doc.selectFirst('.message-body');
+    if (!body) body = doc.selectFirst('article.message .bbWrapper');
+    if (!body) body = doc.selectFirst('.bbWrapper');
 
     if (!body) {
       return '<html><body><p>Chapter content not found.</p></body></html>';
@@ -394,7 +408,7 @@ class DefaultExtension extends MProvider {
     const cleanedHtml = await this.cleanHtmlContent(body.outerHtml || '');
     return `<html><body>${cleanedHtml}</body></html>`;
   }
-
+  
   async cleanHtmlContent(html) {
     if (!html) return '<p>Chapter content not found.</p>';
     let cleaned = html;
