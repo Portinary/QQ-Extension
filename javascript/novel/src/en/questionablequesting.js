@@ -6,7 +6,7 @@ const mangayomiSources = [{
   "iconUrl": "https://forum.questionablequesting.com/favicon.ico",
   "typeSource": "single",
   "itemType": 2,
-  "version": "1.5.0",
+  "version": "1.5.1",
   "pkgPath": "",
   "notes": ""
 }];
@@ -27,7 +27,7 @@ class DefaultExtension extends MProvider {
   upgradeAvatar(src) {
     if (!src) return '';
     const upgraded = src.replace(/\/avatars\/[sm]\//, '/avatars/l/');
-    return upgraded.startsWith('http') ? upgraded : SITE + upgraded;
+    return upgraded.startsWith('http') ? upgraded : SITE + (upgraded.startsWith('/') ? upgraded : '/' + upgraded);
   }
 
   stripTitlePrefix(title) {
@@ -40,8 +40,8 @@ class DefaultExtension extends MProvider {
   }
 
   normalizeThreadUrl(href) {
-    if (!href) return href;
-    let h = href;
+    if (!href) return '';
+    let h = href.startsWith('http') ? href : SITE + (href.startsWith('/') ? href : '/' + href);
     h = h.replace(/\/unread(\/|\?|$).*$/, '/');
     h = h.replace(/\/latest(\/|\?|$).*$/, '/');
     h = h.replace(/\/post-\d+.*$/, '/');
@@ -91,7 +91,7 @@ class DefaultExtension extends MProvider {
     if (res.statusCode >= 300 && res.statusCode < 400) {
       const location = res.headers && (res.headers['location'] || res.headers['Location']);
       if (location) {
-        const absoluteLocation = location.startsWith('http') ? location : SITE + location;
+        const absoluteLocation = location.startsWith('http') ? location : SITE + (location.startsWith('/') ? location : '/' + location);
         res = await client.get(absoluteLocation, this.getHeaders(absoluteLocation));
       }
     }
@@ -211,7 +211,7 @@ class DefaultExtension extends MProvider {
   htmlToText(html) {
     if (!html) return '';
     return html
-      .replace(/<\/p>/gi, '\n')
+      .replace(/<\/p>/gi, '\n\n')
       .replace(/<br\s*\/?>/gi, '\n')
       .replace(/<\/div>/gi, '\n')
       .replace(/<[^>]+>/g, '')
@@ -221,7 +221,8 @@ class DefaultExtension extends MProvider {
   }
 
   async getDetail(url) {
-    const slug = url
+    const targetUrl = url.startsWith('http') ? url : SITE + (url.startsWith('/') ? url : '/' + url);
+    const slug = targetUrl
       .replace(/^https?:\/\/[^/]+/, '')
       .replace(/^\/?threads\//, '')
       .replace(/\/threadmarks.*$/, '')
@@ -246,7 +247,7 @@ class DefaultExtension extends MProvider {
     let description = '';
     const headerDesc = doc.selectFirst('.threadmarkListingHeader-extraInfo .bbWrapper');
     if (headerDesc) {
-      description = this.htmlToText(headerDesc.text || '').slice(0, 500);
+      description = this.htmlToText(headerDesc.outerHtml || '').slice(0, 500);
     }
 
     const categories = [];
@@ -256,7 +257,7 @@ class DefaultExtension extends MProvider {
       if (!href) continue;
       categories.push({ 
         label: (el.text || '').trim(), 
-        url: href.startsWith('http') ? href : SITE + href, 
+        url: href.startsWith('http') ? href : SITE + (href.startsWith('/') ? href : '/' + href), 
         isMain: !href.includes('threadmark_category=') 
       });
     }
@@ -279,7 +280,7 @@ class DefaultExtension extends MProvider {
 
     return {
       'name': title,
-      'link': url,
+      'link': targetUrl,
       'imageUrl': '',
       'description': description,
       'author': author,
@@ -294,12 +295,11 @@ class DefaultExtension extends MProvider {
 
     let res = await client.get(targetUrl, this.getHeaders(targetUrl));
 
-    // Resolve HTTP redirect chains explicitly for Foxlations
     let redirectCount = 0;
     while ((res.statusCode >= 300 && res.statusCode < 400) && redirectCount < 3) {
       const location = res.headers && (res.headers['location'] || res.headers['Location']);
       if (!location) break;
-      targetUrl = location.startsWith('http') ? location : SITE + location;
+      targetUrl = location.startsWith('http') ? location : SITE + (location.startsWith('/') ? location : '/' + location);
       res = await client.get(targetUrl, this.getHeaders(targetUrl));
       redirectCount++;
     }
@@ -310,7 +310,6 @@ class DefaultExtension extends MProvider {
 
     let rawHtml = '';
 
-    // Targeted extraction with simple fallbacks to avoid DOM parser crashes
     if (postId) {
       const targetArticle = 
         doc.selectFirst(`article#js-post-${postId}`) || 
@@ -319,13 +318,13 @@ class DefaultExtension extends MProvider {
 
       if (targetArticle) {
         const wrapper = targetArticle.selectFirst('.bbWrapper') || targetArticle.selectFirst('.message-body');
-        if (wrapper) rawHtml = wrapper.text || wrapper.outerHtml || '';
+        if (wrapper) rawHtml = wrapper.outerHtml || '';
       }
     }
 
     if (!rawHtml) {
       const fallbackWrapper = doc.selectFirst('.message-inner .bbWrapper') || doc.selectFirst('.bbWrapper');
-      if (fallbackWrapper) rawHtml = fallbackWrapper.text || fallbackWrapper.outerHtml || '';
+      if (fallbackWrapper) rawHtml = fallbackWrapper.outerHtml || '';
     }
 
     if (!rawHtml) {
@@ -352,7 +351,6 @@ class DefaultExtension extends MProvider {
 
     let processed = html;
 
-    // Convert images to [Image Here] placeholders for dual compatibility
     processed = processed.replace(/<img[^>]*>/gi, '<p style="text-align: center; color: #888888;"><b>[Image Here]</b></p>');
     processed = processed.replace(/<a\b[^>]*class=["'][^"']*lbContainer[^"']*["'][^>]*>.*?<\/a>/gi, '<p style="text-align: center; color: #888888;"><b>[Image Here]</b></p>');
 
