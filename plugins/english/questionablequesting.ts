@@ -10,7 +10,7 @@ class QuestionableQuesting implements Plugin.PluginBase {
   id = 'questionablequesting';
   name = 'Questionable Questing';
   site = SITE;
-  version = '1.3.7';
+  version = '1.3.8';
   icon = 'src/en/questionablequesting/icon.png';
   author = 'personal';
 
@@ -345,22 +345,27 @@ class QuestionableQuesting implements Plugin.PluginBase {
     // Remove scripts and embeds that could auto-play
     body.find('script, noscript, iframe, video, audio, embed, object').remove();
 
-    // Fix lazy-loaded images (including inside spoilers)
+    // Fix lazy-loaded images
     body.find('img').each((_i, el) => {
       const $img = $(el);
+
       const realSrc =
-        $img.attr('data-src') || $img.attr('data-url') || $img.attr('src');
-      if (realSrc) {
-        const absolute = realSrc.startsWith('http')
+        $img.attr('data-src') ||
+        $img.attr('data-url') ||
+        $img.attr('src');
+
+      if (!realSrc) return;
+
+      const absolute =
+        realSrc.startsWith('http://') || realSrc.startsWith('https://')
           ? realSrc
-          : realSrc.startsWith('/')
-            ? SITE + realSrc
-            : SITE + '/' + realSrc;
-        $img.attr('src', absolute);
-        $img.removeAttr('data-src');
-        $img.removeAttr('data-url');
-        $img.removeClass('lazyload');
-      }
+          : realSrc.startsWith('//')
+            ? `https:${realSrc}`
+            : realSrc.startsWith('/')
+              ? SITE + realSrc
+              : SITE + '/' + realSrc;
+
+      $img.attr('src', absolute);
     });
 
     // Unwrap spoilers into readable inline content
