@@ -6,7 +6,7 @@ const mangayomiSources = [{
   "iconUrl": "https://forum.questionablequesting.com/favicon.ico",
   "typeSource": "single",
   "itemType": 2,
-  "version": "1.4.1",
+  "version": "1.5.0",
   "pkgPath": "",
   "notes": ""
 }];
@@ -71,10 +71,13 @@ class DefaultExtension extends MProvider {
       const rawHref = linkEl.attr('href');
       if (!rawHref) continue;
 
+      const imgEl = el.selectFirst('.structItem-cell--icon img');
+      const imgSrc = imgEl ? (imgEl.attr('src') || imgEl.attr('data-src')) : '';
+
       novels.push({
-        'name': this.stripTitlePrefix(linkEl.text || linkEl.outerHtml || ''),
+        'name': this.stripTitlePrefix(linkEl.text || ''),
         'link': this.normalizeThreadUrl(rawHref),
-        'imageUrl': (el.selectFirst('.structItem-cell--icon img') ? this.upgradeAvatar(el.selectFirst('.structItem-cell--icon img').attr('src') || el.selectFirst('.structItem-cell--icon img').attr('data-src')) : ''),
+        'imageUrl': this.upgradeAvatar(imgSrc),
       });
     }
 
@@ -102,10 +105,13 @@ class DefaultExtension extends MProvider {
       const href = linkEl.attr('href');
       if (!href) continue;
 
+      const imgEl = el.selectFirst('.contentRow-figure img');
+      const imgSrc = imgEl ? (imgEl.attr('src') || imgEl.attr('data-src')) : '';
+
       novels.push({
-        'name': this.stripTitlePrefix(linkEl.text || linkEl.outerHtml || ''),
+        'name': this.stripTitlePrefix(linkEl.text || ''),
         'link': this.normalizeThreadUrl(href),
-        'imageUrl': (el.selectFirst('.contentRow-figure img') ? this.upgradeAvatar(el.selectFirst('.contentRow-figure img').attr('src') || el.selectFirst('.contentRow-figure img').attr('data-src')) : ''),
+        'imageUrl': this.upgradeAvatar(imgSrc),
       });
     }
 
@@ -146,7 +152,7 @@ class DefaultExtension extends MProvider {
       if (!rawHref) continue;
 
       const href = rawHref.startsWith('http') ? rawHref : SITE + (rawHref.startsWith('/') ? rawHref : '/' + rawHref);
-      const rawName = linkEl.text.trim();
+      const rawName = (linkEl.text || '').trim();
       if (!rawName) continue;
 
       let dateUpload = null;
@@ -174,9 +180,9 @@ class DefaultExtension extends MProvider {
     const statsList = doc.select('.threadmarkListingHeader-stats dl.pairs');
     for (const el of statsList) {
       const dt = el.selectFirst('dt');
-      if (dt && dt.text.trim() === 'Threadmarks') {
+      if (dt && (dt.text || '').trim() === 'Threadmarks') {
         const dd = el.selectFirst('dd');
-        if (dd) count = parseInt(dd.text.replace(/,/g, '') || '0', 10);
+        if (dd) count = parseInt((dd.text || '').replace(/,/g, '') || '0', 10);
       }
     }
     return { count, pages: count > 0 ? Math.ceil(count / PER_PAGE) : 1 };
@@ -203,6 +209,7 @@ class DefaultExtension extends MProvider {
   }
 
   htmlToText(html) {
+    if (!html) return '';
     return html
       .replace(/<\/p>/gi, '\n')
       .replace(/<br\s*\/?>/gi, '\n')
@@ -239,7 +246,7 @@ class DefaultExtension extends MProvider {
     let description = '';
     const headerDesc = doc.selectFirst('.threadmarkListingHeader-extraInfo .bbWrapper');
     if (headerDesc) {
-      description = this.htmlToText(headerDesc.outerHtml || '').slice(0, 500);
+      description = this.htmlToText(headerDesc.text || '').slice(0, 500);
     }
 
     const categories = [];
@@ -287,6 +294,7 @@ class DefaultExtension extends MProvider {
 
     let res = await client.get(targetUrl, this.getHeaders(targetUrl));
 
+    // Resolve HTTP redirect chains explicitly for Foxlations
     let redirectCount = 0;
     while ((res.statusCode >= 300 && res.statusCode < 400) && redirectCount < 3) {
       const location = res.headers && (res.headers['location'] || res.headers['Location']);
@@ -300,29 +308,31 @@ class DefaultExtension extends MProvider {
     const postMatch = url.match(/post-(\d+)/) || targetUrl.match(/post-(\d+)/);
     const postId = postMatch ? postMatch[1] : null;
 
-    let body = null;
+    let rawHtml = '';
 
+    // Targeted extraction with simple fallbacks to avoid DOM parser crashes
     if (postId) {
       const targetArticle = 
         doc.selectFirst(`article#js-post-${postId}`) || 
         doc.selectFirst(`article#post-${postId}`) || 
-        doc.selectFirst(`[data-content="post-${postId}"]`) ||
-        doc.selectFirst(`article[id*="${postId}"]`);
+        doc.selectFirst(`[data-content="post-${postId}"]`);
 
       if (targetArticle) {
-        body = targetArticle.selectFirst('.bbWrapper') || targetArticle.selectFirst('.message-body');
+        const wrapper = targetArticle.selectFirst('.bbWrapper') || targetArticle.selectFirst('.message-body');
+        if (wrapper) rawHtml = wrapper.text || wrapper.outerHtml || '';
       }
     }
 
-    if (!body) body = doc.selectFirst('.message-inner .bbWrapper');
-    if (!body) body = doc.selectFirst('article.message-body .bbWrapper');
-    if (!body) body = doc.selectFirst('.bbWrapper');
+    if (!rawHtml) {
+      const fallbackWrapper = doc.selectFirst('.message-inner .bbWrapper') || doc.selectFirst('.bbWrapper');
+      if (fallbackWrapper) rawHtml = fallbackWrapper.text || fallbackWrapper.outerHtml || '';
+    }
 
-    if (!body) {
+    if (!rawHtml) {
       throw new Error("Could not find chapter content");
     }
 
-    return this.cleanHtmlContent(body.outerHtml || '');
+    return this.cleanHtmlContent(rawHtml);
   }
 
   cleanHtmlContent(html) {
@@ -342,36 +352,9 @@ class DefaultExtension extends MProvider {
 
     let processed = html;
 
-    // Strip XenForo Lightbox anchor wrappers
-    processed = processed.replace(/<a\b[^>]*class=["'][^"']*lbContainer[^"']*["'][^>]*>(.*?)<\/a>/gi, '$1');
-
-    // Parse img tags and prefer external image sources
-    processed = processed.replace(/<img([^>]*?)>/gi, (match, attrs) => {
-      const dataUrlMatch = attrs.match(/data-url=["']([^"']+)["']/i);
-      const dataSrcMatch = attrs.match(/data-src=["']([^"']+)["']/i);
-      const srcMatch = attrs.match(/\bsrc=["']([^"']+)["']/i);
-
-      let realSrc = '';
-      if (dataUrlMatch && !dataUrlMatch[1].startsWith('data:')) realSrc = dataUrlMatch[1];
-      else if (dataSrcMatch && !dataSrcMatch[1].startsWith('data:')) realSrc = dataSrcMatch[1];
-      else if (srcMatch && !srcMatch[1].startsWith('data:')) realSrc = srcMatch[1];
-
-      if (!realSrc) return '<p style="text-align: center; color: #888888;"><b>[Image Here]</b></p>';
-
-      let absolute = realSrc.trim();
-
-      // If it's an internal XenForo forum attachment, Mangayomi will be blocked (403), so use text placeholder
-      if (absolute.includes('/attachments/') || absolute.includes('questionablequesting.com/index.php?attachments/')) {
-        return '<p style="text-align: center; color: #888888;"><b>[Forum Image Attachment]</b></p>';
-      }
-
-      if (!absolute.startsWith('http://') && !absolute.startsWith('https://')) {
-        if (!absolute.startsWith('/')) absolute = '/' + absolute;
-        absolute = SITE + absolute;
-      }
-
-      return `<br/><img src="${absolute}" /><br/>`;
-    });
+    // Convert images to [Image Here] placeholders for dual compatibility
+    processed = processed.replace(/<img[^>]*>/gi, '<p style="text-align: center; color: #888888;"><b>[Image Here]</b></p>');
+    processed = processed.replace(/<a\b[^>]*class=["'][^"']*lbContainer[^"']*["'][^>]*>.*?<\/a>/gi, '<p style="text-align: center; color: #888888;"><b>[Image Here]</b></p>');
 
     return processed;
   }
