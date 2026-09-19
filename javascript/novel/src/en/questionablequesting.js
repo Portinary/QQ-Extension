@@ -6,7 +6,7 @@ const mangayomiSources = [{
   "iconUrl": "https://forum.questionablequesting.com/favicon.ico",
   "typeSource": "single",
   "itemType": 2,
-  "version": "1.4.0",
+  "version": "1.4.1",
   "pkgPath": "",
   "notes": ""
 }];
@@ -342,11 +342,36 @@ class DefaultExtension extends MProvider {
 
     let processed = html;
 
-    // Replace <img> tags with styled [Image Here] placeholder text block
-    processed = processed.replace(/<img[^>]*>/gi, '<p style="text-align: center; color: #888888;"><b>[Image Here]</b></p>');
+    // Strip XenForo Lightbox anchor wrappers
+    processed = processed.replace(/<a\b[^>]*class=["'][^"']*lbContainer[^"']*["'][^>]*>(.*?)<\/a>/gi, '$1');
 
-    // Replace attachment containers with [Image Here] placeholder
-    processed = processed.replace(/<a\b[^>]*class=["'][^"']*lbContainer[^"']*["'][^>]*>.*?<\/a>/gi, '<p style="text-align: center; color: #888888;"><b>[Image Here]</b></p>');
+    // Parse img tags and prefer external image sources
+    processed = processed.replace(/<img([^>]*?)>/gi, (match, attrs) => {
+      const dataUrlMatch = attrs.match(/data-url=["']([^"']+)["']/i);
+      const dataSrcMatch = attrs.match(/data-src=["']([^"']+)["']/i);
+      const srcMatch = attrs.match(/\bsrc=["']([^"']+)["']/i);
+
+      let realSrc = '';
+      if (dataUrlMatch && !dataUrlMatch[1].startsWith('data:')) realSrc = dataUrlMatch[1];
+      else if (dataSrcMatch && !dataSrcMatch[1].startsWith('data:')) realSrc = dataSrcMatch[1];
+      else if (srcMatch && !srcMatch[1].startsWith('data:')) realSrc = srcMatch[1];
+
+      if (!realSrc) return '<p style="text-align: center; color: #888888;"><b>[Image Here]</b></p>';
+
+      let absolute = realSrc.trim();
+
+      // If it's an internal XenForo forum attachment, Mangayomi will be blocked (403), so use text placeholder
+      if (absolute.includes('/attachments/') || absolute.includes('questionablequesting.com/index.php?attachments/')) {
+        return '<p style="text-align: center; color: #888888;"><b>[Forum Image Attachment]</b></p>';
+      }
+
+      if (!absolute.startsWith('http://') && !absolute.startsWith('https://')) {
+        if (!absolute.startsWith('/')) absolute = '/' + absolute;
+        absolute = SITE + absolute;
+      }
+
+      return `<br/><img src="${absolute}" /><br/>`;
+    });
 
     return processed;
   }
